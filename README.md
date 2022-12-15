@@ -12,8 +12,10 @@ and it is organized as follows:
 
 * Quality Control
 * Deconvolution
-* General Analysis
+* General Analysis per Sample
+* General Integrated analysis
 * Figure arrangement 
+* Wrapper Functions
 
 The raw data (count matrices, H&E figures...) and the intermediates files generated during the analysis and required to re-run the analysis are available in zenodo.   
 

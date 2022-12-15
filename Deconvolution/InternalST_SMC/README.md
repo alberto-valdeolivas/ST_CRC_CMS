@@ -8,4 +8,4 @@ This folder contains the deconvolution results on  our set of CRC ST samples usi
 
 * [07c_Cell2Loc_Deconvolution_Downstream_Analysis.ipynb](https://github.com/alberto-valdeolivas/CRC_CMS_ST/blob/main/Deconvolution/InternalST_SMC/07c_Cell2Loc_Deconvolution_Downstream_Analysis.ipynb): downstream analysis on the deconvolution resutls containing a clustering based on cell abundance and a cell type co-localization analysis, among others. 
 
-In addition, we provide the detailed results per sample for all the cell types in this [folder](https://github.com/alberto-valdeolivas/CRC_CMS_ST/tree/main/Deconvolution/InternalST_SMC/DetailedResults).
+In addition, the notebooks containing the detailed results per sample for all the cell types are availabe at zenodo (Too big for github). 

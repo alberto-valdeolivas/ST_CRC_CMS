@@ -4,6 +4,7 @@ This repository contains the scripts developed for the analysis of a set of CRC 
 
 The study outline is summarized in the following figure: 
 
+![Study Outline](https://github.com/alberto-valdeolivas/CRC_CMS_ST/raw/main/Extras/StudyOutline.png)
 
 We processed fresh-frozen resection samples obtained from seven CRC patients for ST using 10x Genomics VISIUM aiming at exploring spatial molecular heterogeneity in CRC. We considered two serial sections per patient to generate technical replicates.
 

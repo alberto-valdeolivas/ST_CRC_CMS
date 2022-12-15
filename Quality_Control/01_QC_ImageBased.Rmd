@@ -1,0 +1,162 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Image-based Quality Control"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes the the Spatial Omics data generated with 10X 
+technology on a set of rat liver samples and performs a image based quality 
+control analysis. 
+
+```{r, message=FALSE, warning=FALSE}
+## Loading the required libraries and setting the parameters. 
+library(ggplot2)
+library(vctrs)
+library(patchwork,lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(hdf5r, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(SeuratObject)
+library(Seurat)
+library(tidyverse)
+source(file = "WrapperFunction/SeuratWrappers.R")
+
+data_directory <-  params$data_directory
+counts_directory <- "/outs"
+
+output_names <- "SeuratList.rds"
+
+data_directory_counts <- paste0(data_directory, "Fastq_Merged")
+```
+
+```{r, message=FALSE, warning=FALSE}
+datasets <- 
+  list.dirs(path = data_directory_counts, recursive = FALSE, full.names = TRUE) %>% 
+  str_subset("Count_") %>%
+  paste0(counts_directory)
+
+sample_names <- 
+  list.dirs(path = data_directory_counts, recursive = FALSE, full.names = FALSE) %>% 
+  str_subset("Count_") %>%
+  str_replace("Count_", "") 
+```
+
+```{r, message=FALSE, warning=FALSE}
+## Generating Seurat Objects 
+seurat_objects <- 
+  get.seurat.objects(datasets,sample_names)
+seurat_objects_raw <- 
+  get.seurat.objects(datasets,sample_names, raw = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+## Reading metadata: tissue position.
+all_metadata_ <-
+  purrr::map2(seurat_objects_raw, datasets, add_tissue_position)
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+## We generate some plots for quality control that are shown in the next 
+## sections 
+myImages <- get.image.spatial(seurat_objects)
+
+qc_spatial_plots_raw <- 
+  get.qc.spatial(seurat_objects_raw, pt.size.factor = 1.5, alpha = 0.8)
+qc_violin_plots <- get.qc.violin(seurat_objects_raw)
+
+show_distribution <- get.undertissue.violon(all_metadata_)
+
+qc_spatial_plots <- get.qc.spatial(seurat_objects, pt.size.factor = 1.75)
+qc_violin_plots <- get.qc.violin(seurat_objects)
+
+seurat_objects <- 
+  get.qc.mt.percentage(seurat_objects, mypattern = "^MT-")
+                       
+percent.mt_spatial_plots <- 
+  get.qc.spatial(seurat_objects, features = c("percent.mt"), 
+  pt.size.factor = 1.75)        
+percent.mt_violin_plots <- 
+  get.qc.violin(seurat_objects, features= c("percent.mt"))
+
+qc_nCountRNA_percent.mt <- 
+  get.FeatureScatter.plots(seurat_objects, feature1 = "nCount_Spatial", 
+  feature2 = "percent.mt")
+qc_nCountRNA_nFeatureRNA <-
+  get.FeatureScatter.plots(seurat_objects, feature1 = "nCount_Spatial", 
+  feature2 = "nFeature_Spatial")
+```
+
+# Samples Visualization 
+
+```{r, results = 'asis', message=FALSE, warning=FALSE}
+for ( sample in names(seurat_objects )){
+  
+  cat( "## Sample : ", sample , "\n\n" )
+  
+  cat( "Showing sample : ", sample , "\n\n")
+  
+  
+  cat( "### Raw information \n\n")
+  print( myImages[[sample]])
+  print( qc_spatial_plots_raw[[sample]])
+  
+  print(show_distribution[[sample]])
+  
+  
+  cat( "\n\n")
+  cat( "### Only undertissue information \n\n")
+  
+  
+  print( qc_spatial_plots[[sample]])
+  
+  print( qc_violin_plots[[sample]])
+  
+  
+  cat( "\n\n")
+  cat( "### Percentage of counts from mitochondial genes \n\n")
+  print(percent.mt_spatial_plots[[sample]]) 
+  cat( "\n\n")
+  print(percent.mt_violin_plots[[sample]])
+  
+  cat( "\n\n")
+  cat( "### Feature Scatter Plots \n\n")
+  print(qc_nCountRNA_percent.mt[[sample]]) + print(qc_nCountRNA_nFeatureRNA[[sample]])
+  
+  cat( "\n\n")
+  
+}
+```
+
+
+# Conclusion 
+
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

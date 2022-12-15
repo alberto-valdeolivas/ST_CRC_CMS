@@ -1,0 +1,186 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Quality Control: Global Metrics"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes the summary of the spaceRanger output from the Spatial 
+Transcriptomics data generated with 10X VISIUM technology on a set of CRC 
+samples.
+
+# Getting Ready
+
+We first load the libraries and set the paths to the raw data. 
+
+```{r, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(tidyverse)
+library(kableExtra)
+library(RColorBrewer)
+source(file = "WrapperFunction/SeuratWrappers.R")
+
+data_directory <- 
+ params$data_directory
+analysis_name <- 
+  params$analysis_name
+counts_directory <- "/outs"
+
+dir.create(paste0(data_directory, analysis_name), showWarnings = FALSE)
+
+# setwd(paste0(data_directory, analysis_name))
+data_directory_counts <- paste0(data_directory, "Fastq_Merged")
+```
+
+We get the folders containing the spatial counts for the different samples. 
+
+```{r}
+datasets <- 
+  list.dirs(path = data_directory_counts, recursive = FALSE, full.names = TRUE) %>% 
+  str_subset("Count_") %>% paste0(counts_directory)
+  
+sample_names <- 
+  list.dirs(path = data_directory_counts, recursive = FALSE, full.names = FALSE) %>% 
+  str_subset("Count_") %>% str_replace("Count_", "")
+```
+
+We read the metrics summary for all the samples. 
+
+```{r, warning=FALSE, message=FALSE}
+QC_global_df <- 
+  get.global.QCmetrics(datasets, sample_names, metrics_name = "/metrics_summary.csv") 
+QC_global_df %>% kbl() %>% kable_styling() %>% scroll_box(width = "100%")
+```
+
+## Number of Spots Under Tissue
+
+```{r, dpi=80, message=FALSE, warning=FALSE}
+get.barplot.qc(QC_global_df, column_to_plot = "Number of Spots Under Tissue")
+```
+
+## Median Genes per Spot 
+
+```{r, dpi=80, message=FALSE, warning=FALSE}
+get.barplot.qc(QC_global_df, column_to_plot = "Median Genes per Spot")
+```
+
+## Number of Reads
+
+```{r, dpi=80, message=FALSE, warning=FALSE}
+get.barplot.qc(QC_global_df, column_to_plot = "Number of Reads")
+```
+
+## Reads Mapped Confidently to Transcriptome  
+
+```{r, dpi=80, message=FALSE, warning=FALSE}
+get.barplot.qc(QC_global_df, column_to_plot = "Reads Mapped Confidently to Transcriptome")
+```
+
+## Reads Mapped Confidently to Genome
+
+```{r, dpi=80, message=FALSE, warning=FALSE}
+get.barplot.qc(QC_global_df, column_to_plot = "Reads Mapped Confidently to Genome")
+```
+
+## Fraction of Spots Under Tissue
+
+```{r, dpi=80, message=FALSE, warning=FALSE}
+get.barplot.qc(QC_global_df, column_to_plot = "Fraction of Spots Under Tissue")
+```
+
+## Fraction Reads in Spots Under Tissue
+
+```{r, dpi=80, message=FALSE, warning=FALSE}
+get.barplot.qc(QC_global_df, column_to_plot = "Fraction Reads in Spots Under Tissue")
+```
+
+## Median UMI Counts per Spot
+
+```{r, dpi=80, message=FALSE, warning=FALSE}
+get.barplot.qc(QC_global_df, column_to_plot = "Median UMI Counts per Spot")
+```
+
+## Improved Median Genes and UMI counts per Spot
+
+```{r, dpi=300, message=FALSE, warning=FALSE, fig.height=8, fig.width=14}
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+
+QC_global_df$samples_name <- 
+  stringr::str_replace(QC_global_df$samples_name, pattern= "SN123_A938797_Rep1_X", replacement = "SN123_A938797_Rep1")
+
+QC_global_df <- QC_global_df %>%
+    dplyr::mutate(replicate = str_remove(.$samples_name, pattern = ".*_")) 
+    
+QC_global_df$patient <- 
+  stringr::str_match(QC_global_df$samples_name, "_\\s*(.*?)\\s*_")[,2]
+
+QC_global_df <-  inner_join(QC_global_df, df_patient_ID_transform)
+
+QC_global_df$slide <- str_extract(QC_global_df$samples_name , "[^_]+")
+
+QC_global_df$patient_ID_rep <- paste0(QC_global_df$patient_ID, "_", QC_global_df$replicate)
+  
+
+
+p1 <- ggplot(QC_global_df, aes(fill=slide, y=`Median Genes per Spot`, x=patient_ID_rep)) + 
+    geom_bar(position="dodge", stat="identity") + theme_light() + 
+    theme(legend.position = "top", legend.title = element_text(size = 14, face = "bold"),
+          legend.text = element_text(size = 12, hjust = 1, angle = 0),
+          axis.text.x = element_text(angle = 90, hjust = 0, size = 12, face = "bold"), 
+          axis.text.y = element_text(angle = 0, hjust = 1, size = 12), 
+          axis.title.y = element_text(size = 16, face = "bold")) + 
+    xlab("") + ylab("Median Genes per Spot") + scale_fill_brewer(palette="Dark2")
+p2 <- ggplot(QC_global_df, aes(fill=slide, y=`Median UMI Counts per Spot`, x=patient_ID_rep)) + 
+    geom_bar(position="dodge", stat="identity") + theme_light() + 
+    theme(legend.position = "top", legend.title = element_text(size = 14, face = "bold"),
+          legend.text = element_text(size = 12, hjust = 1, angle = 0),
+          axis.text.x = element_text(angle = 90, hjust = 0, size = 12, face = "bold"), 
+          axis.text.y = element_text(angle = 0, hjust = 1, size = 12), 
+          axis.title.y = element_text(size = 16, face = "bold")) + 
+    xlab("") + ylab("Median UMI Counts per Spot") + scale_fill_brewer(palette="Dark2")
+p1 + p2  
+```
+
+
+
+# Conclusion 
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```
+
+

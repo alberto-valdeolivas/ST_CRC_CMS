@@ -12,6 +12,7 @@ and it is organized as follows:
 
 * Quality Control
 * Deconvolution
+* Sample Characterization 
 * General Analysis per Sample
 * General Integrated analysis
 * Figure arrangement 

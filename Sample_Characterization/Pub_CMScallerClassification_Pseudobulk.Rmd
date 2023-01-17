@@ -1,0 +1,304 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Pseudo-bulk CMS based classification"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+In this script, we generate pseudo-bulk of our set of 10x VISIUM ST CRC samples
+and we use https://github.com/Lothelab/CMScaller to assign them to the different
+CMS. 
+
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(scater)
+library(dplyr)
+library(readr)
+library(stringr)
+library(RColorBrewer)
+library(cowplot)
+library(Biobase)
+library(CMScaller)
+
+
+source(file = "WrapperFunction/SeuratWrappers.R")
+source(file = "WrapperFunction/PseudoBulkUtils.R")
+
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_folder <- "IntermediaryFiles/"
+input_names_1 <- "SeuratList_Clusters_Res05.rds"
+input_names_2 <- "Patho_Annotations/"
+
+
+files_to_read_1 <- paste0(data_directory, analysis_name,input_folder,input_names_1)
+files_to_read_2 <- paste0(data_directory, analysis_name,input_folder,input_names_2)
+```
+
+# Results
+
+I read the seurat object 
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read_1)
+```
+
+
+## Pseudo-bulk of the whole sample
+
+```{r, warning=FALSE, message=FALSE}
+pseudobulk_profiles_all <- lapply(seurat_objects, get_sample_pseudo)
+
+
+gex_all <- do.call(cbind, lapply(pseudobulk_profiles_all, function(x){
+  assay(x)}))
+
+## We change the names for the plotting: 
+
+colnames(gex_all) <- 
+  c("S5_Rec_Rep1", "S5_Rec_Rep2", 
+    "S3_Col_R_Rep1", "S3_Col_R_Rep2", 
+    "S1_Cec_Rep1", "S2_Col_R_Rep1",
+    "S7_Rec/Sig_Rep1", "S6_Rec_Rep1",
+    "S1_Cec_Rep2", "S2_Col_R_Rep2", 
+    "S7_Rec/Sig_Rep2","S6_Rec_Rep2",
+    "S4_Col_Sig_Rep1","S4_Col_Sig_Rep2")
+```
+
+We call CMScaller to see the results on the whole section of the samples. 
+
+```{r, warning=FALSE, message=FALSE}
+gex_all_entrez <- replaceGeneId(gex_all, id.in = "symbol", id.out = "entrez")
+gex_all_entrez <- gex_all_entrez[!(str_detect(rownames(gex_all_entrez), "^NA.")),]
+
+res_all <- CMScaller(gex_all_entrez, RNAseq=TRUE, doPlot = FALSE)
+
+res_df_all <- res_all %>% as.data.frame() %>% tibble::rownames_to_column(var = "sample") %>% 
+  dplyr::select(sample, prediction) 
+
+res_df_all$sample <- 
+  factor(res_df_all$sample , 
+         levels = sort(unique(res_df_all$sample), decreasing = TRUE)) 
+
+
+res_df_all %>% ggplot(aes(prediction, sample, color = prediction)) +
+  geom_point(size = 8) + 
+  scale_color_brewer(palette = "Paired") + 
+  theme( # remove the vertical grid lines
+    axis.title = element_text(size=14, face = "bold", family="Arial"), 
+    axis.text.x = element_text(size=10, face = "bold", family="Arial", angle = 90),
+    axis.text.y = element_text(size=10, face = "bold", family="Arial")) + 
+  labs(x="Predicted CMS", y ="Sample") + 
+  theme(legend.position ="none") 
+```
+
+```{r, warning=FALSE, message=FALSE}
+cam <- CMSgsa(emat=gex_all_entrez, class=res_df_all$prediction,RNAseq=TRUE)
+```
+
+## Pseudo-bulk of the tumor annotated spots. 
+
+We have to read pathologist annotations
+
+```{r, warning=FALSE, message=FALSE}
+tumor_annotations <- c("tumor")
+tumor_annotations_all <- 
+  c("tumor", "tumor&stroma_IC med to high", "tumor&stroma_IC low", 
+    "tumor&stroma IC med to high")
+
+seurat_objects_OnlyTumor <- 
+  lapply(seurat_objects, function(x){
+    current_sample <- unique(x@meta.data$orig.ident)
+    
+    patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".csv"))
+    
+    colnames(patho_anno_current_sample) <- c("Barcode", "Pathologist_Annotations")
+    
+    x@meta.data <- x@meta.data %>%
+      tibble::rownames_to_column("spot_id") %>%
+      dplyr::left_join(patho_anno_current_sample, by = c("spot_id" = "Barcode")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+        "tumor&stroma IC med to high", "tumor&stroma_IC med to high")) %>% 
+      tibble::column_to_rownames("spot_id") 
+      
+    
+    
+    Idents(x) <- 'Pathologist_Annotations'
+    x <- subset(x, idents = intersect(levels(Idents(x)), tumor_annotations))
+
+    return(x)
+})
+```
+
+
+No tumor annotated spots in the samples S7_Rec/Sig
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects_OnlyTumor <- 
+  seurat_objects_OnlyTumor[names(seurat_objects_OnlyTumor) %in% 
+                           c("SN123_A798015_Rep1", "SN124_A798015_Rep2") == FALSE]
+
+lapply(seurat_objects_OnlyTumor, SpatialPlot)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+pseudobulk_profiles_tumor <- lapply(seurat_objects_OnlyTumor, get_sample_pseudo)
+
+
+gex_tumor <- do.call(cbind, lapply(pseudobulk_profiles_tumor, function(x){
+  assay(x)}))
+## We change the names for the plotting: 
+
+colnames(gex_tumor) <- 
+  c("S5_Rec_Rep1", "S5_Rec_Rep2", 
+    "S3_Col_R_Rep1", "S3_Col_R_Rep2", 
+    "S1_Cec_Rep1", "S2_Col_R_Rep1",
+    "S6_Rec_Rep1",
+    "S1_Cec_Rep2", "S2_Col_R_Rep2", 
+    "S6_Rec_Rep2",
+    "S4_Col_Sig_Rep1","S4_Col_Sig_Rep2")
+```
+
+```{r, warning=FALSE, message=FALSE}
+gex_tumor_entrez <- replaceGeneId(gex_tumor, id.in = "symbol", id.out = "entrez")
+gex_tumor_entrez <- gex_tumor_entrez[!(str_detect(rownames(gex_tumor_entrez), "^NA.")),]
+
+
+res_tumor <- CMScaller(gex_tumor_entrez, RNAseq=TRUE, doPlot = FALSE)
+
+res_df_tumor <- res_tumor %>% as.data.frame() %>% tibble::rownames_to_column(var = "sample") %>% 
+  dplyr::select(sample, prediction) 
+
+res_df_tumor$sample <- 
+  factor(res_df_tumor$sample , 
+         levels = sort(unique(res_df_tumor$sample), decreasing = TRUE)) 
+
+
+res_df_tumor %>% ggplot(aes(prediction, sample, color = prediction)) +
+  geom_point(size = 8) + 
+  scale_color_brewer(palette = "Paired") + 
+  theme( # remove the vertical grid lines
+    axis.title = element_text(size=14, face = "bold", family="Arial"), 
+    axis.text.x = element_text(size=10, face = "bold", family="Arial", angle = 90),
+    axis.text.y = element_text(size=10, face = "bold", family="Arial")) + 
+  labs(x="Predicted CMS", y ="Sample") + 
+  theme(legend.position ="none") 
+```
+
+```{r, warning=FALSE, message=FALSE}
+cam <- CMSgsa(emat=gex_tumor_entrez, class=res_df_tumor$prediction,RNAseq=TRUE)
+```
+
+
+## Plots for Supplementary material 
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+df_to_plot <- res_df_all %>% dplyr::mutate(type = "All Spots") %>% 
+  rbind(res_df_tumor %>% dplyr::mutate(type = "Tumor Spots")) 
+
+df_to_add <- data.frame(sample = c("S7_Rec/Sig_Rep1", "S7_Rec/Sig_Rep2"), 
+                        prediction = c(NA, NA), 
+                        type = c("Tumor Spots", "Tumor Spots"))
+  
+df_to_plot %>% rbind(df_to_add) %>%  
+  ggplot(aes(type, sample , fill= prediction)) + 
+  geom_tile(size =1.25, color ="black", width = 0.95) + 
+  theme_bw()  + 
+  theme(axis.title = element_blank(), 
+        axis.ticks = element_blank(), panel.border = element_blank(), 
+          panel.background = element_blank(),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1),
+          axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+          legend.position ="right", legend.text = element_text(size=12, face="bold", family="Arial"),
+          legend.title =  element_text(size=12, face="bold", family="Arial")) +
+          scale_fill_brewer(palette = "Set1") + 
+          guides(fill = guide_legend(title = "Predicted CMS", override.aes = list(size = 10))) 
+  
+```
+
+
+## Why are annotating as CMS4 S6 and S2? 
+
+We check if we have some stromal markers in those spots. 
+
+```{r, warning=FALSE, message=FALSE}
+fybroblast_markers <- c("COL3A1", "DCN", "THY1")
+```
+
+### SN124_A938797_Rep2
+
+```{r, warning=FALSE, message=FALSE, fig.width=8, fig.height=6}
+SpatialFeaturePlot(seurat_objects_OnlyTumor[["SN124_A938797_Rep2"]], 
+                   features = fybroblast_markers, pt.size.factor = 2.25)
+```
+
+### A595688 Why a replicate is CMS4 and the other CMS2?
+
+```{r, warning=FALSE, message=FALSE, fig.width=8, fig.height=6}
+SpatialFeaturePlot(seurat_objects_OnlyTumor[["SN123_A595688_Rep1"]], 
+                   features = fybroblast_markers, pt.size.factor = 2.25)
+```
+
+```{r, warning=FALSE, message=FALSE, fig.width=8, fig.height=6}
+SpatialFeaturePlot(seurat_objects_OnlyTumor[["SN124_A595688_Rep2"]], 
+                   features = fybroblast_markers, pt.size.factor = 2.25)
+```
+
+```{r, warning=FALSE, message=FALSE}
+merge_seurat_objects_A595688 <- 
+  merge(x = seurat_objects_OnlyTumor[["SN123_A595688_Rep1"]], 
+        y= seurat_objects_OnlyTumor[["SN124_A595688_Rep2"]])
+
+merge_seurat_objects_A595688_V2 <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_objects_A595688, 
+    slot = "counts"), min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE)
+merge_seurat_objects_A595688_V2@meta.data$orig.ident <- 
+  merge_seurat_objects_A595688@meta.data$orig.ident 
+```
+
+```{r, warning=FALSE, message=FALSE}
+VlnPlot(merge_seurat_objects_A595688_V2, 
+        features = fybroblast_markers, group.by = "orig.ident", assay="RNA") 
+```
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

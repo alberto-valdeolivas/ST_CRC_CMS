@@ -1,0 +1,148 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Pseudo-bulk CMS based classification"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+In this script, we generate pseudo-bulk of the external set of 10x VISIUM ST CRC samples extracted from the following publication:  
+
+_Wu, Y. et al. Spatiotemporal Immune Landscape of Colorectal Cancer Liver Metastasis at Single-Cell Level. Cancer Discov. 12, 134–153 (2022)._
+
+and we use https://github.com/Lothelab/CMScaller to assign them to the different CMS. 
+
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(scater)
+library(dplyr)
+library(readr)
+library(stringr)
+library(RColorBrewer)
+library(cowplot)
+library(Biobase)
+library(CMScaller)
+
+
+source(file = "../WrapperFunction/SeuratWrappers.R")
+source(file = "../WrapperFunction/PseudoBulkUtils.R")
+
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_folder <- "ST_LiverMetastases_pub/IntermediaryFiles/"
+input_names_1 <- "SeuratList_Clusters_Res05.rds"
+
+files_to_read_1 <- paste0(data_directory, analysis_name,input_folder,input_names_1)
+```
+
+# Results
+
+I read the seurat object 
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read_1)
+```
+
+
+## Pseudo-bulk of the whole sample
+
+```{r, warning=FALSE, message=FALSE}
+pseudobulk_profiles_all <- lapply(seurat_objects, get_sample_pseudo)
+
+
+gex_all <- do.call(cbind, lapply(pseudobulk_profiles_all, function(x){
+  assay(x)}))
+
+## We change the names for the plotting: 
+
+colnames(gex_all) <- 
+  c("ST-colon1_Unt", "ST-colon2_Unt", 
+    "ST-colon3_Tre", "ST-colon4_Tre", 
+    "ST-liver1_Unt", "ST-liver2_Unt",
+    "ST-liver3_Tre", "ST-liver4_Tre")
+```
+
+We call CMScaller to see the results on the whole section of the samples. 
+
+```{r, warning=FALSE, message=FALSE}
+gex_all_entrez <- replaceGeneId(gex_all, id.in = "symbol", id.out = "entrez")
+gex_all_entrez <- gex_all_entrez[!(str_detect(rownames(gex_all_entrez), "^NA.")),]
+
+res_all <- CMScaller(gex_all_entrez, RNAseq=TRUE, doPlot = FALSE)
+
+res_df_all <- res_all %>% as.data.frame() %>% tibble::rownames_to_column(var = "sample") %>% 
+  dplyr::select(sample, prediction) 
+
+res_df_all$sample <- 
+  factor(res_df_all$sample , 
+         levels = sort(unique(res_df_all$sample), decreasing = TRUE)) 
+
+
+res_df_all %>% ggplot(aes(prediction, sample, color = prediction)) +
+  geom_point(size = 8) + 
+  scale_color_brewer(palette = "Paired") + 
+  theme( # remove the vertical grid lines
+    axis.title = element_text(size=14, face = "bold", family="Arial"), 
+    axis.text.x = element_text(size=10, face = "bold", family="Arial", angle = 90),
+    axis.text.y = element_text(size=10, face = "bold", family="Arial")) + 
+  labs(x="Predicted CMS", y ="Sample") + 
+  theme(legend.position ="none") 
+```
+
+```{r, warning=FALSE, message=FALSE}
+cam <- CMSgsa(emat=gex_all_entrez, class=res_df_all$prediction,RNAseq=TRUE)
+```
+
+## Plots for Supplementary material 
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+res_df_all %>%  dplyr::mutate(type = "CMS") %>% 
+  ggplot(aes(type, sample , fill= prediction)) + 
+  geom_tile(size =1.25, color ="black", width = 0.95) + 
+  theme_bw()  + 
+  theme(axis.title = element_blank(), 
+        axis.ticks = element_blank(), panel.border = element_blank(), 
+          panel.background = element_blank(),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          axis.text.x = element_blank(),
+          axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+          legend.position ="right", legend.text = element_text(size=12, face="bold", family="Arial"),
+          legend.title =  element_text(size=12, face="bold", family="Arial")) +
+          scale_fill_brewer(palette = "Set1") + 
+          guides(fill = guide_legend(title = "Predicted CMS", override.aes = list(size = 10))) 
+```
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

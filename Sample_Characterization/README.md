@@ -12,6 +12,6 @@ This folder contains the scripts created to characterize the internal and extern
 
 We perfomed pseudo-bulk in our samples and classified then to the different CMS using [CMScaller](https://www.nature.com/articles/s41598-017-16747-x)
 
-* [Pub_CMScallerClassification_Pseudobulk.Rmd](https://github.com/alberto-valdeolivas/ST_CRC_CMS/blob/main/Sample_Characterization/Pub_CMScallerClassification_Pseudobulk.Rmd): Classification of our internal ST CRC dataset
+* [Pub_CMScallerClassification_Pseudobulk.Rmd](https://github.com/alberto-valdeolivas/ST_CRC_CMS/blob/main/Sample_Characterization/Pub_CMScallerClassification_Pseudobulk.Rmd): Classification of our internal ST CRC dataset. The HTML notebook was uploaded to zenodo and can be rendered following this link. 
 * [Pub_CMSCaller_PseudoBulkClassification.Rmd](https://github.com/alberto-valdeolivas/ST_CRC_CMS/blob/main/Sample_Characterization/Pub_CMSCaller_PseudoBulkClassification.Rmd): Classification of the external ST CRC dataset. The HTML notebook was uploaded to zenodo and can be rendered following this link. 
 

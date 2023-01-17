@@ -1,0 +1,149 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: TF activity using Viper and Dorothea"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes Spatial Omics data generated with 10X technology
+of a set of colorectal cancer samples and computes pathway activity using 
+Dorothea regulons and viper.  
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+# library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(readr)
+library(purrr)
+library(kableExtra)
+library(dorothea)
+source(file = "WrapperFunction/SeuratWrappers.R")
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "IntermediaryFiles/"
+input_names <- "SeuratList_Clusters_Res05.rds"
+output_names <- "SeuratList_Clusters_Res05_Dorothea.rds"
+
+
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+results_directory <- paste0(data_directory, analysis_name, input_files)
+```
+
+
+We read the Seurat objects files after Quality Control
+
+```{r, warning=FALSE}
+seurat_objects <- readRDS(files_to_read)
+```
+
+# Computing TF activity with Dorothea and Viper
+
+We compute TF activity using Dorothea and Viper
+
+```{r, message=FALSE, warning=FALSE}
+seurat_objects <- get.dorothea.scores(seurat_objects)
+```
+
+We check the TFs showing most variable activity from the spatial point of view:
+
+```{r, warning=FALSE, message=FALSE}
+method <- "markvariogram"
+assay = "dorothea"
+nr_features_to_table <- 20
+nr_features_to_plot <- 8
+seurat_objects <- get.spatial.features(seurat_objects, dorothea = TRUE)
+```
+
+# Results {.tabset}
+
+We display the spatial and violin plots for the most variable genes.
+
+```{r, results = 'asis', message=FALSE, dpi=80, warning=FALSE}
+for ( sample in names(seurat_objects)){
+  
+  cat( "## Sample : ", sample , "\n\n" )
+  
+  cat( "Showing sample : ", sample , "\n\n")
+  
+  top_features <- SVFInfo(seurat_objects[[sample]], 
+    selection.method = method, assay = assay, status = TRUE) %>%
+    dplyr::filter(variable ==  "TRUE") 
+  
+  filename_variableTFs <- 
+    paste0(data_directory, analysis_name, input_files, 
+      "VariableTFs/", sample , ".csv")
+  df_towrite <- data.frame(
+    TF = rownames(top_features), 
+    r.metric.5 = top_features$r.metric.5,
+    rank = top_features$rank$markvariogram.spatially.variable.rank)
+  
+  write_csv(df_towrite,  file = filename_variableTFs)
+  
+  print(top_features %>%
+    dplyr::slice_min(rank, n = nr_features_to_table) 
+    %>% kbl() %>% kable_styling())
+  
+  features_to_plot <- top_features %>% 
+    dplyr::slice_min(rank, n = nr_features_to_plot) %>% 
+    rownames()
+  
+  DefaultAssay(seurat_objects[[sample]]) <- "dorothea"
+    
+  for (j in seq(from = 1,to= nr_features_to_plot, by=2)){
+    current_features <- features_to_plot[c(j,j+1)]
+    print(SpatialFeaturePlot(seurat_objects[[sample]], 
+      features = current_features, ncol = 2, alpha = 1, pt.size.factor = 1.8))  
+    cat( "\n\n")
+    print(VlnPlot(seurat_objects[[sample]], 
+                  features = current_features, ncol=2))
+    cat( "\n\n")
+  }
+    
+}
+```
+
+
+# Conclusions
+
+# Saving the results
+
+```{r, eval=FALSE}
+saveRDS(seurat_objects, file = paste0(results_directory, output_names))
+```
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

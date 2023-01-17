@@ -1,0 +1,117 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Pathway Activity using Progeny"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes the the Spatial Omics data generated with 10X 
+technology on a set of CRC samples and explores the pathway activity per spot
+using Progeny. 
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+# library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(readr)
+library(purrr)
+library(progeny)
+source(file = "WrapperFunction/SeuratWrappers.R")
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "IntermediaryFiles/"
+input_names <- "SeuratList_Clusters_Res05.rds"
+output_names <- "SeuratList_Clusters_Res05_Progeny.rds"
+
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+results_directory <- paste0(data_directory, analysis_name, input_files)
+# setwd(paste0(data_directory, analysis_name))
+```
+
+We read the Seurat objects files after Quality Control
+
+```{r, warning=FALSE}
+seurat_objects <- readRDS(files_to_read)
+```
+
+# Computing Pathway activity with Progeny
+
+We compute Pathway activity using Progeny
+
+```{r, message=FALSE, warning=FALSE}
+seurat_objects <- get.progeny.scores(seurat_objects)
+# pathway_plots <- get.pathway.plots(seurat_objects, pt.size.factor = 2.25)
+```
+
+# Results {.tabset}
+
+We display the spatial plots showing pathway activity per spot and violing plots
+showing pathway activity per cluster.
+
+```{r, results = 'asis', message=FALSE, dpi=80, warning=FALSE}
+for ( sample in names(seurat_objects)){
+  
+  cat( "## Sample : ", sample , "\n\n" )
+  
+  cat( "Showing sample : ", sample , "\n\n")
+  
+  pathways <- 
+    unique(rownames(GetAssayData(seurat_objects[[sample]], assay = "progeny")))
+  DefaultAssay(seurat_objects[[sample]]) <- "progeny"
+  
+  for (j in seq(from = 1,to= length(pathways), by=2)){
+    current_pathways <- pathways[c(j,j+1)]
+    print(SpatialFeaturePlot(seurat_objects[[sample]], 
+      features = current_pathways, ncol = 2, alpha = 1, pt.size.factor = 2))  
+    cat( "\n\n")
+    print(VlnPlot(seurat_objects[[sample]], 
+                  features = current_pathways, ncol=2))
+    cat( "\n\n")
+  }
+}
+```
+
+# Conclusions
+
+# Saving the results
+
+```{r, eval=FALSE}
+saveRDS(seurat_objects, file = paste0(results_directory, output_names))
+```
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

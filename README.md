@@ -1,4 +1,4 @@
-# Spatial Transcriptomics Decodes the Heterogeneity of the Consensus Molecular Subtypes of Colorectal Cancer
+# Charting the heterogeneity of colorectal cancer consensus molecular subtypes using Spatial transcriptomics
 
 We processed fresh-frozen resection samples obtained from seven CRC patients for ST using 10x Genomics VISIUM aiming at exploring spatial molecular heterogeneity in CRC. We considered two serial sections per patient to generate technical replicates.The study outline is summarized in the following figure: 
 

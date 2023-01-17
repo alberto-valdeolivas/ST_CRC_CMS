@@ -1,0 +1,2822 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Gene Expression Exploration"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script compares the results of the deconvolution when using as 
+reference either the Korean cohort dataset or the Belgian one. 
+
+```{r, warning=FALSE, message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(readr)
+library(stringr)
+library(purrr)
+library(tidyr)
+library(kableExtra)
+library(ggpubr)
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+filename_results_C2L_Korean <- paste0(data_directory, analysis_name,
+  "Cell2Location/results/LocationModelLinearDependentWMultiExperiment_14experiments_36clusters_20654locations_4188genes/W_cell_density_q05.csv")
+
+filename_results_C2L_Belgian <- paste0(data_directory, analysis_name, 
+    "Cell2Location/results/LocationModelLinearDependentWMultiExperiment_14experiments_40clusters_20654locations_4306genes/W_cell_density_q05.csv")
+
+metadata_Korean <- read_tsv(file = paste0(data_directory, analysis_name,  "/Cell2Location/inputs/scRNAseq-ref/raw/metadata.tsv"))
+
+metadata_Belgian <- read_tsv(file = paste0(data_directory, analysis_name,  "/Cell2Location/inputs/scRNAseq-ref/KUL3_cohort/GSE144735_processed_KUL3_CRC_10X_annotation.txt"))
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+```
+
+# Results
+
+## Major cell types
+
+### Korean Cohort
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean <- read_csv(filename_results_C2L_Korean) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern = "Count_")) 
+  
+colnames(results_C2L_Korean) <-
+  str_replace(colnames(results_C2L_Korean), 
+              pattern = "q05_spot_factors", replacement = "")
+
+results_C2L_Korean <- results_C2L_Korean %>% 
+  dplyr::mutate(sample = str_extract(.$spot_id, pattern =".*Rep[1-2]")) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern =".*Rep[1-2]_")) %>%
+  dplyr::mutate(spot_id = str_remove(spot_id, pattern = "^X_")) %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") 
+```
+
+```{r, warning=FALSE, message=FALSE}
+epithelial_cells_kr <- metadata_Korean %>% 
+  dplyr::filter(Cell_type=="Epithelial cells")
+
+
+tumor_epithelial_cells_kr <- epithelial_cells_kr %>%
+  dplyr::filter(Cell_subtype %in% c("CMS1","CMS2","CMS3","CMS4")) %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct() 
+tumor_epithelial_cells_kr$Cell_type <- "Tumor Cells"
+
+normal_epithelial_cells_kr <- epithelial_cells_kr %>%
+  dplyr::filter(!(Cell_subtype %in% c("CMS1","CMS2","CMS3","CMS4")))  %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% dplyr::distinct() 
+
+stromal_cells_kr <- metadata_Korean %>% 
+  dplyr::filter(Cell_type=="Stromal cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% dplyr::distinct()
+
+myeloid_cells_kr <- metadata_Korean %>% 
+  dplyr::filter(Cell_type=="Myeloids") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+T_cells_kr <- metadata_Korean %>% 
+  dplyr::filter(Cell_type=="T cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+B_cells_kr <- metadata_Korean %>% 
+  dplyr::filter(Cell_type=="B cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+Mast_cells_kr <- metadata_Korean %>% 
+  dplyr::filter(Cell_type=="Mast cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+MainCellTypes_labels_kr <- rbind(tumor_epithelial_cells_kr, 
+                              normal_epithelial_cells_kr, 
+                              stromal_cells_kr, 
+                              myeloid_cells_kr,
+                              T_cells_kr, B_cells_kr, Mast_cells_kr) %>% 
+  dplyr::filter(Cell_subtype != "Unknown")
+
+results_C2L_Korean_MajorCells <- results_C2L_Korean %>% 
+  dplyr::inner_join(MainCellTypes_labels_kr,  by = "Cell_subtype")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean_MajorCells_Total <- results_C2L_Korean_MajorCells %>% 
+  dplyr::select(sample, cell_density_q05, Cell_type) %>%
+  dplyr::group_by(sample, Cell_type) %>%
+  summarise(Total = sum(cell_density_q05))
+
+
+results_C2L_Korean_MajorCells_Total <- 
+  results_C2L_Korean_MajorCells_Total %>% 
+  dplyr::mutate(sample = str_remove(sample, "^[^A]+"))  %>%
+  dplyr::mutate(patient = str_remove(sample, "_Rep[1-2]")) %>%
+  dplyr::mutate(replicate = str_remove(sample, ".*_")) %>%
+  dplyr::left_join(df_patient_ID_transform) %>%
+  dplyr::mutate(patient_ID_replicate = paste0(patient_ID, "_" ,replicate )) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean_MajorCells_Total$patient_ID_replicate <- 
+  factor(results_C2L_Korean_MajorCells_Total$patient_ID_replicate , 
+         levels = sort(unique(results_C2L_Korean_MajorCells_Total$patient_ID_replicate), decreasing = TRUE))
+
+p1_Korean <- ggplot(results_C2L_Korean_MajorCells_Total,aes(x = patient_ID_replicate , y= Total, fill = Cell_type)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="Major Cell \n\ type Proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.25,0.5,0.75,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 4))
+```
+
+```{r, warning=FALSE, message=FALSE}
+p1_Korean
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean_MajorCells_proportions <- 
+  results_C2L_Korean_MajorCells_Total %>% 
+    dplyr::group_by(patient_ID_replicate) %>% 
+    dplyr::mutate(Proportions = Total / sum(Total)) %>% 
+    dplyr::ungroup()
+
+results_C2L_Korean_MajorCells_proportions %>% 
+  dplyr::select(patient_ID_replicate, Cell_type, Proportions) %>% 
+  dplyr::arrange(desc(patient_ID_replicate), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+
+### Belgian Cohort
+
+```{r, warning=FALSE, message=FALSE}
+## Belgian Cohort
+results_C2L_Belgian <- read_csv(filename_results_C2L_Belgian) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern = "Count_")) 
+  
+colnames(results_C2L_Belgian) <-
+  str_replace(colnames(results_C2L_Belgian), 
+              pattern = "q05_spot_factors", replacement = "")
+
+results_C2L_Belgian <- results_C2L_Belgian %>% 
+  dplyr::mutate(sample = str_extract(.$spot_id, pattern =".*Rep[1-2]")) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern =".*Rep[1-2]_")) %>%
+  dplyr::mutate(spot_id = str_remove(spot_id, pattern = "^X_")) %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") 
+```
+
+```{r, warning=FALSE, message=FALSE}
+## Global results Belgium
+epithelial_cells_bg <- metadata_Belgian %>% 
+  dplyr::filter(Cell_type=="Epithelial cells")
+
+
+tumor_epithelial_cells_bg <- epithelial_cells_bg %>%
+  dplyr::filter(Cell_subtype %in% c("CMS1","CMS2","CMS3","CMS4")) %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct() 
+tumor_epithelial_cells_bg$Cell_type <- "Tumor Cells"
+
+normal_epithelial_cells_bg <- epithelial_cells_bg %>%
+  dplyr::filter(!(Cell_subtype %in% c("CMS1","CMS2","CMS3","CMS4")))  %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% dplyr::distinct() 
+
+stromal_cells_bg <- metadata_Belgian %>% 
+  dplyr::filter(Cell_type=="Stromal cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% dplyr::distinct()
+
+myeloid_cells_bg <- metadata_Belgian %>% 
+  dplyr::filter(Cell_type=="Myeloids") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+T_cells_bg <- metadata_Belgian %>% 
+  dplyr::filter(Cell_type=="T cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+B_cells_bg <- metadata_Belgian %>% 
+  dplyr::filter(Cell_type=="B cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+Mast_cells_bg <- metadata_Belgian %>% 
+  dplyr::filter(Cell_type=="Mast cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+MainCellTypes_labels_bg <- rbind(tumor_epithelial_cells_bg, 
+                              normal_epithelial_cells_bg, 
+                              stromal_cells_bg, 
+                              myeloid_cells_bg,
+                              T_cells_bg, B_cells_bg, Mast_cells_bg) %>% 
+  dplyr::filter(Cell_subtype != "Unknown")
+
+results_C2L_Belgian_MajorCells <- results_C2L_Belgian %>% 
+  dplyr::inner_join(MainCellTypes_labels_bg,  by = "Cell_subtype")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_MajorCells_Total <- results_C2L_Belgian_MajorCells %>% 
+  dplyr::select(sample, cell_density_q05, Cell_type) %>%
+  dplyr::group_by(sample, Cell_type) %>%
+  summarise(Total = sum(cell_density_q05))
+
+
+results_C2L_Belgian_MajorCells_Total <- 
+  results_C2L_Belgian_MajorCells_Total %>% 
+  dplyr::mutate(sample = str_remove(sample, "^[^A]+"))  %>%
+  dplyr::mutate(patient = str_remove(sample, "_Rep[1-2]")) %>%
+  dplyr::mutate(replicate = str_remove(sample, ".*_")) %>%
+  dplyr::left_join(df_patient_ID_transform) %>%
+  dplyr::mutate(patient_ID_replicate = paste0(patient_ID, "_" ,replicate )) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_MajorCells_Total$patient_ID_replicate <- 
+  factor(results_C2L_Belgian_MajorCells_Total$patient_ID_replicate , 
+         levels = sort(unique(results_C2L_Belgian_MajorCells_Total$patient_ID_replicate), decreasing = TRUE))
+
+p2_Belgian <- ggplot(results_C2L_Belgian_MajorCells_Total,aes(x = patient_ID_replicate , y= Total, fill = Cell_type)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="Major Cell \n\ type Proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.25,0.5,0.75,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 4))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+p2_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_MajorCells_proportions <- 
+  results_C2L_Belgian_MajorCells_Total %>% 
+    dplyr::group_by(patient_ID_replicate) %>% 
+    dplyr::mutate(Proportions = Total / sum(Total)) %>% 
+    dplyr::ungroup()
+
+results_C2L_Belgian_MajorCells_proportions %>% 
+  dplyr::select(patient_ID_replicate, Cell_type, Proportions) %>% 
+  dplyr::arrange(desc(patient_ID_replicate), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+### Comparison plots
+
+```{r, warning=FALSE, message=FALSE}
+p1_Korean_NewTitle <- p1_Korean + labs(title = "Korean Reference")
+
+p2_Belgian_noAxisText <- p2_Belgian + 
+  theme(axis.text.y = element_blank()) + labs(title = "Belgian Reference")
+
+
+
+
+p1_Korean_NewTitle + p2_Belgian_noAxisText + plot_layout(guides = "collect") + 
+    plot_annotation(title = "Major cell type proportions",  
+    theme = theme(plot.title = element_text(size = 16, hjust = 0.6, 
+                                            face = "bold"))) & 
+    theme(legend.position = "bottom")
+```
+
+## CMS Tumor cells
+
+### Korean Cohort
+
+```{r, warning=FALSE, message=FALSE}
+selected_cellTypes <- c("CMS1", "CMS2", "CMS3", "CMS4")
+
+results_C2L_Korean_CMS <- results_C2L_Korean %>% 
+  dplyr::filter(Cell_subtype %in% selected_cellTypes) %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise(Total = sum(cell_density_q05))
+
+results_C2L_Korean_CMS <- 
+  results_C2L_Korean_CMS %>% 
+  dplyr::mutate(sample = str_remove(sample, "^[^A]+"))  %>%
+  dplyr::mutate(patient = str_remove(sample, "_Rep[1-2]")) %>%
+  dplyr::mutate(replicate = str_remove(sample, ".*_")) %>%
+  dplyr::left_join(df_patient_ID_transform) %>%
+  dplyr::mutate(patient_ID_replicate = paste0(patient_ID, "_" ,replicate )) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean_CMS$patient_ID_replicate <- 
+  factor(results_C2L_Korean_CMS$patient_ID_replicate , 
+         levels = sort(unique(results_C2L_Korean_CMS$patient_ID_replicate), decreasing = TRUE))
+
+p1_Korean_CMS <- ggplot(results_C2L_Korean_CMS,aes(x = patient_ID_replicate , y= Total, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="CMS proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.25,0.5,0.75,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 4))
+```
+
+```{r, warning=FALSE, message=FALSE}
+p1_Korean_CMS
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean_CMS_proportions <- 
+  results_C2L_Korean_CMS %>% 
+    dplyr::group_by(patient_ID_replicate) %>% 
+    dplyr::mutate(Proportions = Total / sum(Total)) %>% 
+    dplyr::ungroup()
+
+results_C2L_Korean_CMS_proportions %>% 
+  dplyr::select(patient_ID_replicate, Cell_subtype , Proportions) %>% 
+  dplyr::arrange(desc(patient_ID_replicate), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+
+### Belgian Cohort
+
+```{r, warning=FALSE, message=FALSE}
+selected_cellTypes <- c("CMS1", "CMS2", "CMS3", "CMS4")
+
+results_C2L_Belgian_CMS <- results_C2L_Belgian %>% 
+  dplyr::filter(Cell_subtype %in% selected_cellTypes) %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise(Total = sum(cell_density_q05))
+
+results_C2L_Belgian_CMS <- 
+  results_C2L_Belgian_CMS %>% 
+  dplyr::mutate(sample = str_remove(sample, "^[^A]+"))  %>%
+  dplyr::mutate(patient = str_remove(sample, "_Rep[1-2]")) %>%
+  dplyr::mutate(replicate = str_remove(sample, ".*_")) %>%
+  dplyr::left_join(df_patient_ID_transform) %>%
+  dplyr::mutate(patient_ID_replicate = paste0(patient_ID, "_" ,replicate )) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_CMS$patient_ID_replicate <- 
+  factor(results_C2L_Belgian_CMS$patient_ID_replicate , 
+         levels = sort(unique(results_C2L_Belgian_CMS$patient_ID_replicate), decreasing = TRUE))
+
+p2_Belgian_CMS <- ggplot(results_C2L_Belgian_CMS,aes(x = patient_ID_replicate , y= Total, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="CMS proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.25,0.5,0.75,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 4))
+```
+
+```{r, warning=FALSE, message=FALSE}
+p2_Belgian_CMS
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_CMS_proportions <- 
+  results_C2L_Belgian_CMS %>% 
+    dplyr::group_by(patient_ID_replicate) %>% 
+    dplyr::mutate(Proportions = Total / sum(Total)) %>% 
+    dplyr::ungroup()
+
+results_C2L_Belgian_CMS_proportions %>% 
+  dplyr::select(patient_ID_replicate, Cell_subtype , Proportions) %>% 
+  dplyr::arrange(desc(patient_ID_replicate), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+### Comparison plots
+
+```{r, warning=FALSE, message=FALSE}
+p1_Korean_CMS_NewTitle <- p1_Korean_CMS + labs(title = "Korean Reference")
+
+p2_Belgian_CMS_noAxisText <- p2_Belgian_CMS + 
+  theme(axis.text.y = element_blank()) + labs(title = "Belgian Reference")
+
+
+
+
+p1_Korean_CMS_NewTitle + p2_Belgian_CMS_noAxisText + plot_layout(guides = "collect") + 
+    plot_annotation(title = "CMS tumor cell proportions",  
+    theme = theme(plot.title = element_text(size = 16, hjust = 0.6, 
+                                            face = "bold"))) & 
+    theme(legend.position = "bottom")
+```
+
+## T-cells
+
+### Korean Cohort
+
+```{r, warning=FALSE, message=FALSE}
+selected_cellTypes <- c("Regulatory T cells", "CD8+ T cells", 
+  "T follicular helper cells", "CD4+ T cells", "T helper 17 cells",
+  "gamma delta T cells", "NK cells")
+
+results_C2L_Korean_Tcells <- results_C2L_Korean %>% 
+  dplyr::filter(Cell_subtype %in% selected_cellTypes) %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise(Total = sum(cell_density_q05))
+
+results_C2L_Korean_Tcells <- 
+  results_C2L_Korean_Tcells %>% 
+  dplyr::mutate(sample = str_remove(sample, "^[^A]+"))  %>%
+  dplyr::mutate(patient = str_remove(sample, "_Rep[1-2]")) %>%
+  dplyr::mutate(replicate = str_remove(sample, ".*_")) %>%
+  dplyr::left_join(df_patient_ID_transform) %>%
+  dplyr::mutate(patient_ID_replicate = paste0(patient_ID, "_" ,replicate )) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean_Tcells$patient_ID_replicate <- 
+  factor(results_C2L_Korean_Tcells$patient_ID_replicate , 
+         levels = sort(unique(results_C2L_Korean_Tcells$patient_ID_replicate), decreasing = TRUE))
+
+p1_Korean_Tcells <- ggplot(results_C2L_Korean_Tcells,aes(x = patient_ID_replicate , y= Total, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="T-cells proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.25,0.5,0.75,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 4))
+```
+
+```{r, warning=FALSE, message=FALSE}
+p1_Korean_Tcells
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean_Tcells_proportions <- 
+  results_C2L_Korean_Tcells %>% 
+    dplyr::group_by(patient_ID_replicate) %>% 
+    dplyr::mutate(Proportions = Total / sum(Total)) %>% 
+    dplyr::ungroup()
+
+results_C2L_Korean_Tcells_proportions %>% 
+  dplyr::select(patient_ID_replicate, Cell_subtype , Proportions) %>% 
+  dplyr::arrange(desc(patient_ID_replicate), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+
+### Belgian Cohort
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_Tcells <- results_C2L_Belgian %>% 
+  dplyr::filter(Cell_subtype %in% selected_cellTypes) %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise(Total = sum(cell_density_q05))
+
+results_C2L_Belgian_Tcells <- 
+  results_C2L_Belgian_Tcells %>% 
+  dplyr::mutate(sample = str_remove(sample, "^[^A]+"))  %>%
+  dplyr::mutate(patient = str_remove(sample, "_Rep[1-2]")) %>%
+  dplyr::mutate(replicate = str_remove(sample, ".*_")) %>%
+  dplyr::left_join(df_patient_ID_transform) %>%
+  dplyr::mutate(patient_ID_replicate = paste0(patient_ID, "_" ,replicate )) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_Tcells$patient_ID_replicate <- 
+  factor(results_C2L_Belgian_Tcells$patient_ID_replicate , 
+         levels = sort(unique(results_C2L_Belgian_Tcells$patient_ID_replicate), decreasing = TRUE))
+
+p2_Belgian_Tcells <- ggplot(results_C2L_Belgian_Tcells,aes(x = patient_ID_replicate , y= Total, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="T-cells proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.25,0.5,0.75,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 4))
+```
+
+```{r, warning=FALSE, message=FALSE}
+p2_Belgian_Tcells
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_Tcells_proportions <- 
+  results_C2L_Belgian_Tcells %>% 
+    dplyr::group_by(patient_ID_replicate) %>% 
+    dplyr::mutate(Proportions = Total / sum(Total)) %>% 
+    dplyr::ungroup()
+
+results_C2L_Belgian_Tcells_proportions %>% 
+  dplyr::select(patient_ID_replicate, Cell_subtype , Proportions) %>% 
+  dplyr::arrange(desc(patient_ID_replicate), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+### Comparison plots
+
+```{r, warning=FALSE, message=FALSE}
+p1_Korean_Tcells_NewTitle <- p1_Korean_Tcells + labs(title = "Korean Reference")
+
+p2_Belgian_Tcells_noAxisText <- p2_Belgian_Tcells + 
+  theme(axis.text.y = element_blank()) + labs(title = "Belgian Reference")
+
+
+
+
+p1_Korean_Tcells_NewTitle + p2_Belgian_Tcells_noAxisText + plot_layout(guides = "collect") + 
+    plot_annotation(title = "T-cells proportions",  
+    theme = theme(plot.title = element_text(size = 16, hjust = 0.6, 
+                                            face = "bold"))) & 
+    theme(legend.position = "bottom")
+```
+
+
+## B-cells
+
+### Korean Cohort
+
+```{r, warning=FALSE, message=FALSE}
+selected_cellTypes <- c("IgG+ Plasma", "CD19+CD20+ B", 
+  "IgA+ Plasma")
+
+results_C2L_Korean_Bcells <- results_C2L_Korean %>% 
+  dplyr::filter(Cell_subtype %in% selected_cellTypes) %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise(Total = sum(cell_density_q05))
+
+results_C2L_Korean_Bcells <- 
+  results_C2L_Korean_Bcells %>% 
+  dplyr::mutate(sample = str_remove(sample, "^[^A]+"))  %>%
+  dplyr::mutate(patient = str_remove(sample, "_Rep[1-2]")) %>%
+  dplyr::mutate(replicate = str_remove(sample, ".*_")) %>%
+  dplyr::left_join(df_patient_ID_transform) %>%
+  dplyr::mutate(patient_ID_replicate = paste0(patient_ID, "_" ,replicate )) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean_Bcells$patient_ID_replicate <- 
+  factor(results_C2L_Korean_Bcells$patient_ID_replicate , 
+         levels = sort(unique(results_C2L_Korean_Bcells$patient_ID_replicate), decreasing = TRUE))
+
+p1_Korean_Bcells <- ggplot(results_C2L_Korean_Bcells,aes(x = patient_ID_replicate , y= Total, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="B-cells proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.25,0.5,0.75,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 4))
+```
+
+```{r, warning=FALSE, message=FALSE}
+p1_Korean_Bcells
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean_Bcells_proportions <- 
+  results_C2L_Korean_Bcells %>% 
+    dplyr::group_by(patient_ID_replicate) %>% 
+    dplyr::mutate(Proportions = Total / sum(Total)) %>% 
+    dplyr::ungroup()
+
+results_C2L_Korean_Bcells_proportions %>% 
+  dplyr::select(patient_ID_replicate, Cell_subtype , Proportions) %>% 
+  dplyr::arrange(desc(patient_ID_replicate), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+
+### Belgian Cohort
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_Bcells <- results_C2L_Belgian %>% 
+  dplyr::filter(Cell_subtype %in% selected_cellTypes) %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise(Total = sum(cell_density_q05))
+
+results_C2L_Belgian_Bcells <- 
+  results_C2L_Belgian_Bcells %>% 
+  dplyr::mutate(sample = str_remove(sample, "^[^A]+"))  %>%
+  dplyr::mutate(patient = str_remove(sample, "_Rep[1-2]")) %>%
+  dplyr::mutate(replicate = str_remove(sample, ".*_")) %>%
+  dplyr::left_join(df_patient_ID_transform) %>%
+  dplyr::mutate(patient_ID_replicate = paste0(patient_ID, "_" ,replicate )) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_Bcells$patient_ID_replicate <- 
+  factor(results_C2L_Belgian_Bcells$patient_ID_replicate , 
+         levels = sort(unique(results_C2L_Belgian_Bcells$patient_ID_replicate), decreasing = TRUE))
+
+p2_Belgian_Bcells <- ggplot(results_C2L_Belgian_Bcells,aes(x = patient_ID_replicate , y= Total, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="B-cells proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.25,0.5,0.75,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 4))
+```
+
+```{r, warning=FALSE, message=FALSE}
+p2_Belgian_Bcells
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_Bcells_proportions <- 
+  results_C2L_Belgian_Bcells %>% 
+    dplyr::group_by(patient_ID_replicate) %>% 
+    dplyr::mutate(Proportions = Total / sum(Total)) %>% 
+    dplyr::ungroup()
+
+results_C2L_Belgian_Bcells_proportions %>% 
+  dplyr::select(patient_ID_replicate, Cell_subtype , Proportions) %>% 
+  dplyr::arrange(desc(patient_ID_replicate), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+### Comparison plots
+
+```{r, warning=FALSE, message=FALSE}
+p1_Korean_Bcells_NewTitle <- p1_Korean_Bcells + labs(title = "Korean Reference")
+
+p2_Belgian_Bcells_noAxisText <- p2_Belgian_Bcells + 
+  theme(axis.text.y = element_blank()) + labs(title = "Belgian Reference")
+
+
+
+
+p1_Korean_Bcells_NewTitle + p2_Belgian_Bcells_noAxisText + plot_layout(guides = "collect") + 
+    plot_annotation(title = "B-cells proportions",  
+    theme = theme(plot.title = element_text(size = 16, hjust = 0.6, 
+                                            face = "bold"))) & 
+    theme(legend.position = "bottom")
+```
+
+
+## Myeloid cells
+
+### Korean Cohort
+
+```{r, warning=FALSE, message=FALSE}
+selected_cellTypes <- c("SPP1+", "Pro-inflammatory", 
+  "cDC", "Proliferating", "SPP1+B", "SPP1+A", "Anti-inflammatory")
+
+results_C2L_Korean_Myeloidcells <- results_C2L_Korean %>% 
+  dplyr::filter(Cell_subtype %in% selected_cellTypes) %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise(Total = sum(cell_density_q05))
+
+results_C2L_Korean_Myeloidcells <- 
+  results_C2L_Korean_Myeloidcells %>% 
+  dplyr::mutate(sample = str_remove(sample, "^[^A]+"))  %>%
+  dplyr::mutate(patient = str_remove(sample, "_Rep[1-2]")) %>%
+  dplyr::mutate(replicate = str_remove(sample, ".*_")) %>%
+  dplyr::left_join(df_patient_ID_transform) %>%
+  dplyr::mutate(patient_ID_replicate = paste0(patient_ID, "_" ,replicate )) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean_Myeloidcells$patient_ID_replicate <- 
+  factor(results_C2L_Korean_Myeloidcells$patient_ID_replicate , 
+         levels = sort(unique(results_C2L_Korean_Myeloidcells$patient_ID_replicate), decreasing = TRUE))
+
+p1_Korean_Myeloidcells <- ggplot(results_C2L_Korean_Myeloidcells,aes(x = patient_ID_replicate , y= Total, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="Myeloid cells proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.25,0.5,0.75,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 4))
+```
+
+```{r, warning=FALSE, message=FALSE}
+p1_Korean_Myeloidcells
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean_Myeloidcells_proportions <- 
+  results_C2L_Korean_Myeloidcells %>% 
+    dplyr::group_by(patient_ID_replicate) %>% 
+    dplyr::mutate(Proportions = Total / sum(Total)) %>% 
+    dplyr::ungroup()
+
+results_C2L_Korean_Myeloidcells_proportions %>% 
+  dplyr::select(patient_ID_replicate, Cell_subtype , Proportions) %>% 
+  dplyr::arrange(desc(patient_ID_replicate), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+
+### Belgian Cohort
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_Myeloidcells <- results_C2L_Belgian %>% 
+  dplyr::filter(Cell_subtype %in% selected_cellTypes) %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise(Total = sum(cell_density_q05))
+
+results_C2L_Belgian_Myeloidcells <- 
+  results_C2L_Belgian_Myeloidcells %>% 
+  dplyr::mutate(sample = str_remove(sample, "^[^A]+"))  %>%
+  dplyr::mutate(patient = str_remove(sample, "_Rep[1-2]")) %>%
+  dplyr::mutate(replicate = str_remove(sample, ".*_")) %>%
+  dplyr::left_join(df_patient_ID_transform) %>%
+  dplyr::mutate(patient_ID_replicate = paste0(patient_ID, "_" ,replicate )) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_Myeloidcells$patient_ID_replicate <- 
+  factor(results_C2L_Belgian_Myeloidcells$patient_ID_replicate , 
+         levels = sort(unique(results_C2L_Belgian_Myeloidcells$patient_ID_replicate), decreasing = TRUE))
+
+p2_Belgian_Myeloidcells <- ggplot(results_C2L_Belgian_Myeloidcells,aes(x = patient_ID_replicate , y= Total, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="Myeloid cell proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.25,0.5,0.75,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 4))
+```
+
+```{r, warning=FALSE, message=FALSE}
+p2_Belgian_Myeloidcells
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_Myeloidcells_proportions <- 
+  results_C2L_Belgian_Myeloidcells %>% 
+    dplyr::group_by(patient_ID_replicate) %>% 
+    dplyr::mutate(Proportions = Total / sum(Total)) %>% 
+    dplyr::ungroup()
+
+results_C2L_Belgian_Myeloidcells_proportions %>% 
+  dplyr::select(patient_ID_replicate, Cell_subtype , Proportions) %>% 
+  dplyr::arrange(desc(patient_ID_replicate), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+### Comparison plots
+
+```{r, warning=FALSE, message=FALSE}
+p1_Korean_Myeloidcells_NewTitle <- p1_Korean_Myeloidcells + labs(title = "Korean Reference")
+
+p2_Belgian_Myeloidcells_noAxisText <- p2_Belgian_Myeloidcells + 
+  theme(axis.text.y = element_blank()) + labs(title = "Belgian Reference")
+
+
+
+
+p1_Korean_Myeloidcells_NewTitle + p2_Belgian_Myeloidcells_noAxisText + plot_layout(guides = "collect") + 
+    plot_annotation(title = "Myeloid cells proportions",  
+    theme = theme(plot.title = element_text(size = 16, hjust = 0.6, 
+                                            face = "bold"))) & 
+    theme(legend.position = "bottom")
+```
+
+
+
+## Main Stromal cells
+
+### Korean Cohort
+
+```{r, warning=FALSE, message=FALSE}
+selected_cellTypes <- c("Myofibroblasts", "Stromal 1", 
+  "Stromal 2", "Stromal 3")
+
+results_C2L_Korean_Stromalcells <- results_C2L_Korean %>% 
+  dplyr::filter(Cell_subtype %in% selected_cellTypes) %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise(Total = sum(cell_density_q05))
+
+results_C2L_Korean_Stromalcells <- 
+  results_C2L_Korean_Stromalcells %>% 
+  dplyr::mutate(sample = str_remove(sample, "^[^A]+"))  %>%
+  dplyr::mutate(patient = str_remove(sample, "_Rep[1-2]")) %>%
+  dplyr::mutate(replicate = str_remove(sample, ".*_")) %>%
+  dplyr::left_join(df_patient_ID_transform) %>%
+  dplyr::mutate(patient_ID_replicate = paste0(patient_ID, "_" ,replicate )) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean_Stromalcells$patient_ID_replicate <- 
+  factor(results_C2L_Korean_Stromalcells$patient_ID_replicate , 
+         levels = sort(unique(results_C2L_Korean_Stromalcells$patient_ID_replicate), decreasing = TRUE))
+
+p1_Korean_Stromalcells <- ggplot(results_C2L_Korean_Stromalcells,aes(x = patient_ID_replicate , y= Total, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="B-cells proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.25,0.5,0.75,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 4))
+```
+
+```{r, warning=FALSE, message=FALSE}
+p1_Korean_Stromalcells
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Korean_Stromalcells_proportions <- 
+  results_C2L_Korean_Stromalcells %>% 
+    dplyr::group_by(patient_ID_replicate) %>% 
+    dplyr::mutate(Proportions = Total / sum(Total)) %>% 
+    dplyr::ungroup()
+
+results_C2L_Korean_Stromalcells_proportions %>% 
+  dplyr::select(patient_ID_replicate, Cell_subtype , Proportions) %>% 
+  dplyr::arrange(desc(patient_ID_replicate), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+
+### Belgian Cohort
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_Stromalcells <- results_C2L_Belgian %>% 
+  dplyr::filter(Cell_subtype %in% selected_cellTypes) %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise(Total = sum(cell_density_q05))
+
+results_C2L_Belgian_Stromalcells <- 
+  results_C2L_Belgian_Stromalcells %>% 
+  dplyr::mutate(sample = str_remove(sample, "^[^A]+"))  %>%
+  dplyr::mutate(patient = str_remove(sample, "_Rep[1-2]")) %>%
+  dplyr::mutate(replicate = str_remove(sample, ".*_")) %>%
+  dplyr::left_join(df_patient_ID_transform) %>%
+  dplyr::mutate(patient_ID_replicate = paste0(patient_ID, "_" ,replicate )) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_Stromalcells$patient_ID_replicate <- 
+  factor(results_C2L_Belgian_Stromalcells$patient_ID_replicate , 
+         levels = sort(unique(results_C2L_Belgian_Stromalcells$patient_ID_replicate), decreasing = TRUE))
+
+p2_Belgian_Stromalcells <- ggplot(results_C2L_Belgian_Stromalcells,aes(x = patient_ID_replicate , y= Total, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="B-cells proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.25,0.5,0.75,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 4))
+```
+
+```{r, warning=FALSE, message=FALSE}
+p2_Belgian_Stromalcells
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_Belgian_Stromalcells_proportions <- 
+  results_C2L_Belgian_Stromalcells %>% 
+    dplyr::group_by(patient_ID_replicate) %>% 
+    dplyr::mutate(Proportions = Total / sum(Total)) %>% 
+    dplyr::ungroup()
+
+results_C2L_Belgian_Stromalcells_proportions %>% 
+  dplyr::select(patient_ID_replicate, Cell_subtype , Proportions) %>% 
+  dplyr::arrange(desc(patient_ID_replicate), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+### Comparison plots
+
+```{r, warning=FALSE, message=FALSE}
+p1_Korean_Stromalcells_NewTitle <- p1_Korean_Stromalcells + labs(title = "Korean Reference")
+
+p2_Belgian_Stromalcells_noAxisText <- p2_Belgian_Stromalcells + 
+  theme(axis.text.y = element_blank()) + labs(title = "Belgian Reference")
+
+
+
+
+p1_Korean_Stromalcells_NewTitle + p2_Belgian_Stromalcells_noAxisText + plot_layout(guides = "collect") + 
+    plot_annotation(title = "Main stromal cells proportions",  
+    theme = theme(plot.title = element_text(size = 16, hjust = 0.6, 
+                                            face = "bold"))) & 
+    theme(legend.position = "bottom")
+```
+
+
+
+## Spatial Maps of the different samples
+
+```{r, warning=FALSE, message=FALSE}
+files_to_read_seurat <- paste0(data_directory,  analysis_name,"IntermediaryFiles/SeuratList_Clusters_Res05.rds")
+seurat_objects <- readRDS(files_to_read_seurat)
+```
+
+### Sample S1_Cec_Rep1
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A551763_Rep1"
+current_object <- seurat_objects[[current_sample]]
+
+
+results_C2L_sample_Korean <- results_C2L_Korean %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Korean")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+
+results_C2L_sample_Belgian <- results_C2L_Belgian %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Belgian")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+results_C2L_sample_all <- results_C2L_sample_Korean %>% 
+  dplyr::left_join(results_C2L_sample_Belgian)
+
+current_object@meta.data <- 
+  current_object@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample_all, 
+                   by = c("spot_id" = "spot_id", "orig.ident" = "sample")) %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S1_Cec_Rep1_CMS1_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS1_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S1_Cec_Rep1_CMS1_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S1_Cec_Rep1_CMS1_Korean + plot_S1_Cec_Rep1_CMS1_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S1_Cec_Rep1_CMS2_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS2_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S1_Cec_Rep1_CMS2_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S1_Cec_Rep1_CMS2_Korean + plot_S1_Cec_Rep1_CMS2_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S1_Cec_Rep1_CMS3_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS3_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S1_Cec_Rep1_CMS3_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S1_Cec_Rep1_CMS3_Korean + plot_S1_Cec_Rep1_CMS3_Belgian
+```
+
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S1_Cec_Rep1_CMS4_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS4_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S1_Cec_Rep1_CMS4_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S1_Cec_Rep1_CMS4_Korean + plot_S1_Cec_Rep1_CMS4_Belgian
+```
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "Myofibroblasts_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S1_Cec_Rep1_Myofibroblasts_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted Myofibroblasts abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "Myofibroblasts_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S1_Cec_Rep1_Myofibroblasts_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted Myofibroblasts abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_S1_Cec_Rep1_Myofibroblasts_Korean + plot_S1_Cec_Rep1_Myofibroblasts_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "Stromal 1_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 3),2)
+  
+plot_S1_Cec_Rep1_Stromal_1_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted Stromal 1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "Stromal 1_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S1_Cec_Rep1_Stromal_1_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted Stromal 1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_S1_Cec_Rep1_Stromal_1_Korean + plot_S1_Cec_Rep1_Stromal_1_Belgian
+```
+
+
+### Sample S2_Col_R_Rep1
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A595688_Rep1"
+current_object <- seurat_objects[[current_sample]]
+
+
+results_C2L_sample_Korean <- results_C2L_Korean %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Korean")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+
+results_C2L_sample_Belgian <- results_C2L_Belgian %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Belgian")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+results_C2L_sample_all <- results_C2L_sample_Korean %>% 
+  dplyr::left_join(results_C2L_sample_Belgian)
+
+current_object@meta.data <- 
+  current_object@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample_all, 
+                   by = c("spot_id" = "spot_id", "orig.ident" = "sample")) %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S2_Col_R_Rep1_CMS1_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS1_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S2_Col_R_Rep1_CMS1_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S2_Col_R_Rep1_CMS1_Korean + plot_S2_Col_R_Rep1_CMS1_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S2_Col_R_Rep1_CMS2_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS2_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S2_Col_R_Rep1_CMS2_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S2_Col_R_Rep1_CMS2_Korean + plot_S2_Col_R_Rep1_CMS2_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S2_Col_R_Rep1_CMS3_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS3_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S2_Col_R_Rep1_CMS3_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S2_Col_R_Rep1_CMS3_Korean + plot_S2_Col_R_Rep1_CMS3_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S2_Col_R_Rep1_CMS4_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS4_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S2_Col_R_Rep1_CMS4_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S2_Col_R_Rep1_CMS4_Korean + plot_S2_Col_R_Rep1_CMS4_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "SPP1+_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S2_Col_R_Rep1_SPP1_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted SPP1+ abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "SPP1+A_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S2_Col_R_Rep1_SPP1A_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted SPP1+A abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "SPP1+B_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S2_Col_R_Rep1_SPP1B_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted SPP1+B abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S2_Col_R_Rep1_SPP1_Korean + plot_S2_Col_R_Rep1_SPP1A_Belgian + plot_S2_Col_R_Rep1_SPP1B_Belgian
+```
+
+
+
+### Sample S3_Col_Rep1
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A416371_Rep1"
+current_object <- seurat_objects[[current_sample]]
+
+
+results_C2L_sample_Korean <- results_C2L_Korean %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Korean")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+
+results_C2L_sample_Belgian <- results_C2L_Belgian %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Belgian")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+results_C2L_sample_all <- results_C2L_sample_Korean %>% 
+  dplyr::left_join(results_C2L_sample_Belgian)
+
+current_object@meta.data <- 
+  current_object@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample_all, 
+                   by = c("spot_id" = "spot_id", "orig.ident" = "sample")) %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S3_Col_Rep1_CMS1_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS1_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S3_Col_Rep1_CMS1_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S3_Col_Rep1_CMS1_Korean + plot_S3_Col_Rep1_CMS1_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S3_Col_Rep1_CMS2_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS2_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S3_Col_Rep1_CMS2_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S3_Col_Rep1_CMS2_Korean + plot_S3_Col_Rep1_CMS2_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S3_Col_Rep1_CMS3_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS3_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S3_Col_Rep1_CMS3_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S3_Col_Rep1_CMS3_Korean + plot_S3_Col_Rep1_CMS3_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S3_Col_Rep1_CMS4_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS4_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S3_Col_Rep1_CMS4_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S3_Col_Rep1_CMS4_Korean + plot_S3_Col_Rep1_CMS4_Belgian
+```
+
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CD8+ T cells_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S3_Col_Rep1_CD8_Tcells_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CD8+ T cells abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CD8+ T cells_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S3_Col_Rep1_CD8_Tcells_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CD8+ T cells abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S3_Col_Rep1_CD8_Tcells_Korean + plot_S3_Col_Rep1_CD8_Tcells_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "Stromal 1_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S3_Col_Rep1_Stromal1_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted Stromal 1 cells abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "Stromal 1_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S3_Col_Rep1_Stromal1_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted Stromal 1 cells abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S3_Col_Rep1_Stromal1_Korean + plot_S3_Col_Rep1_Stromal1_Belgian
+```
+
+
+### Sample S4_Col_Sig_Rep2
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN84_A120838_Rep2"
+current_object <- seurat_objects[[current_sample]]
+
+
+results_C2L_sample_Korean <- results_C2L_Korean %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Korean")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+
+results_C2L_sample_Belgian <- results_C2L_Belgian %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Belgian")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+results_C2L_sample_all <- results_C2L_sample_Korean %>% 
+  dplyr::left_join(results_C2L_sample_Belgian)
+
+current_object@meta.data <- 
+  current_object@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample_all, 
+                   by = c("spot_id" = "spot_id", "orig.ident" = "sample")) %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S4_Col_Sig_Rep2_CMS1_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS1_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S4_Col_Sig_Rep2_CMS1_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S4_Col_Sig_Rep2_CMS1_Korean + plot_S4_Col_Sig_Rep2_CMS1_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S4_Col_Sig_Rep2_CMS2_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS2_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S4_Col_Sig_Rep2_CMS2_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S4_Col_Sig_Rep2_CMS2_Korean + plot_S4_Col_Sig_Rep2_CMS2_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S4_Col_Sig_Rep2_CMS3_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS3_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S4_Col_Sig_Rep2_CMS3_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S4_Col_Sig_Rep2_CMS3_Korean + plot_S4_Col_Sig_Rep2_CMS3_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S4_Col_Sig_Rep2_CMS4_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS4_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S4_Col_Sig_Rep2_CMS4_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S4_Col_Sig_Rep2_CMS4_Korean + plot_S4_Col_Sig_Rep2_CMS4_Belgian
+```
+
+### Sample S5_Rec_Rep1
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A121573_Rep1"
+current_object <- seurat_objects[[current_sample]]
+
+
+results_C2L_sample_Korean <- results_C2L_Korean %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Korean")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+
+results_C2L_sample_Belgian <- results_C2L_Belgian %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Belgian")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+results_C2L_sample_all <- results_C2L_sample_Korean %>% 
+  dplyr::left_join(results_C2L_sample_Belgian)
+
+current_object@meta.data <- 
+  current_object@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample_all, 
+                   by = c("spot_id" = "spot_id", "orig.ident" = "sample")) %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S5_Rec_Rep1_CMS1_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS1_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S5_Rec_Rep1_CMS1_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S5_Rec_Rep1_CMS1_Korean + plot_S5_Rec_Rep1_CMS1_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S5_Rec_Rep1_CMS2_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS2_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S5_Rec_Rep1_CMS2_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S5_Rec_Rep1_CMS2_Korean + plot_S5_Rec_Rep1_CMS2_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S5_Rec_Rep1_CMS3_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS3_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S5_Rec_Rep1_CMS3_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S5_Rec_Rep1_CMS3_Korean + plot_S5_Rec_Rep1_CMS3_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S5_Rec_Rep1_CMS4_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS4_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S5_Rec_Rep1_CMS4_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S5_Rec_Rep1_CMS4_Korean + plot_S5_Rec_Rep1_CMS4_Belgian
+```
+
+### Sample S6_Rec_Rep2
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN124_A938797_Rep2"
+current_object <- seurat_objects[[current_sample]]
+
+
+results_C2L_sample_Korean <- results_C2L_Korean %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Korean")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+
+results_C2L_sample_Belgian <- results_C2L_Belgian %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Belgian")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+results_C2L_sample_all <- results_C2L_sample_Korean %>% 
+  dplyr::left_join(results_C2L_sample_Belgian)
+
+current_object@meta.data <- 
+  current_object@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample_all, 
+                   by = c("spot_id" = "spot_id", "orig.ident" = "sample")) %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S6_Rec_Rep2_CMS1_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS1_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S6_Rec_Rep2_CMS1_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S6_Rec_Rep2_CMS1_Korean + plot_S6_Rec_Rep2_CMS1_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S6_Rec_Rep2_CMS2_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS2_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S6_Rec_Rep2_CMS2_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S6_Rec_Rep2_CMS2_Korean + plot_S6_Rec_Rep2_CMS2_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S6_Rec_Rep2_CMS3_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS3_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S6_Rec_Rep2_CMS3_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S6_Rec_Rep2_CMS3_Korean + plot_S6_Rec_Rep2_CMS3_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S6_Rec_Rep2_CMS4_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS4_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S6_Rec_Rep2_CMS4_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S6_Rec_Rep2_CMS4_Korean + plot_S6_Rec_Rep2_CMS4_Belgian
+```
+
+
+### Sample S7_Rec_Sig_Rep1
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A798015_Rep1"
+current_object <- seurat_objects[[current_sample]]
+
+
+results_C2L_sample_Korean <- results_C2L_Korean %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Korean")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+
+results_C2L_sample_Belgian <- results_C2L_Belgian %>%
+  dplyr::mutate(Cell_subtype = paste0(Cell_subtype, "_Belgian")) %>% 
+  pivot_wider(names_from = Cell_subtype, values_from = cell_density_q05) %>% 
+  dplyr::filter(sample == current_sample)
+
+results_C2L_sample_all <- results_C2L_sample_Korean %>% 
+  dplyr::left_join(results_C2L_sample_Belgian)
+
+current_object@meta.data <- 
+  current_object@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample_all, 
+                   by = c("spot_id" = "spot_id", "orig.ident" = "sample")) %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S7_Rec_Sig_Rep1_CMS1_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS1_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S7_Rec_Sig_Rep1_CMS1_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS1 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S7_Rec_Sig_Rep1_CMS1_Korean + plot_S7_Rec_Sig_Rep1_CMS1_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S7_Rec_Sig_Rep1_CMS2_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS2_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S7_Rec_Sig_Rep1_CMS2_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS2 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S7_Rec_Sig_Rep1_CMS2_Korean + plot_S7_Rec_Sig_Rep1_CMS2_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S7_Rec_Sig_Rep1_CMS3_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS3_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S7_Rec_Sig_Rep1_CMS3_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS3 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S7_Rec_Sig_Rep1_CMS3_Korean + plot_S7_Rec_Sig_Rep1_CMS3_Belgian
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4_Korean"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S7_Rec_Sig_Rep1_CMS4_Korean <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- "CMS4_Belgian"
+
+breaks_vec <- 
+  round(seq(0, max(pull(current_object@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_S7_Rec_Sig_Rep1_CMS4_Belgian <- 
+  Seurat::SpatialFeaturePlot(
+    object = current_object,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle("Predicted CMS4 abundance") + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_S7_Rec_Sig_Rep1_CMS4_Korean + plot_S7_Rec_Sig_Rep1_CMS4_Belgian
+```
+
+
+
+# Conclusion 
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```
+

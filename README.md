@@ -16,7 +16,7 @@ and it is organized as follows:
 * General Analysis per Sample
 * General Integrated analysis
 * Figure arrangement 
-* Analaysis of the external ST CRC samples
+* Additional analaysis of the external ST CRC samples
 * Wrapper Functions
 
 The raw data (count matrices, H&E figures...) and the intermediates files generated during the analysis and required to re-run the analysis are available in zenodo.   

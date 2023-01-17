@@ -1,0 +1,770 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Proportion plots"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Porportion plots for ST CRC samples from the following publication: 
+
+_Wu, Y. et al. Spatiotemporal Immune Landscape of Colorectal Cancer Liver Metastasis at Single-Cell Level. Cancer Discov. 12, 134–153 (2022)._
+
+
+# Getting Ready
+
+We first load the libraries and set the paths to the raw data. 
+
+```{r, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(readr)
+library(dplyr)
+library(stringr)
+library(purrr)
+library(tidyr)
+library(cowplot)
+library(ggpubr)
+library(kableExtra)
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_folder <- "Cell2Location/results/LocationModelLinearDependentWMultiExperiment_8experiments_36clusters_31296locations_4188genesLiverMetastasis/"
+input_names_1 <- "W_cell_density_q05.csv"
+
+
+files_to_read_1 <- paste0(data_directory, analysis_name,input_folder,input_names_1)
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_STLiver_Korean <- read_csv(files_to_read_1) 
+
+colnames(results_STLiver_Korean) <-
+  str_replace(colnames(results_STLiver_Korean), 
+              pattern = "q05_spot_factors", replacement = "")
+
+results_STLiver_Korean <- results_STLiver_Korean %>% 
+  dplyr::mutate(sample = str_extract(.$spot_id, pattern =".*_")) %>%
+  dplyr::mutate(sample = str_remove(.$sample, pattern = "_")) %>% 
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern =".*_")) 
+```
+
+
+# Major Cell types
+
+```{r warning=FALSE, message=FALSE}
+## We define the different cell types: 
+metadata_Lee_paper <- 
+  read_tsv(file = paste0(data_directory, analysis_name, 
+    "Cell2Location/inputs/scRNAseq-ref/raw/metadata.tsv"))
+
+epithelial_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="Epithelial cells")
+
+
+tumor_epithelial_cells <- epithelial_cells %>%
+  dplyr::filter(Cell_subtype %in% c("CMS1","CMS2","CMS3","CMS4")) %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct() 
+tumor_epithelial_cells$Cell_type <- "Tumor Cells"
+
+normal_epithelial_cells <- epithelial_cells %>%
+  dplyr::filter(!(Cell_subtype %in% c("CMS1","CMS2","CMS3","CMS4")))  %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct() 
+
+stromal_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="Stromal cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+myeloid_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="Myeloids") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+T_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="T cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+B_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="B cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+Mast_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="Mast cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+MainCellTypes_labels <- rbind(tumor_epithelial_cells, 
+                              normal_epithelial_cells, 
+                              stromal_cells, 
+                              myeloid_cells,
+                              T_cells, B_cells, Mast_cells) 
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_STLiver_Korean_mainCellLines <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::left_join(MainCellTypes_labels, by="Cell_subtype") %>%
+  dplyr::select(sample, cell_density_q05, Cell_type) %>%
+  dplyr::group_by(sample, Cell_type) %>%
+  summarise_all(funs(sum)) 
+
+
+
+results_STLiver_Korean_mainCellLines <- 
+  results_STLiver_Korean_mainCellLines %>% 
+  dplyr::mutate(sample = case_when(sample == "ST-colon1" ~ "ST-colon1_Unt",
+                                   sample =="ST-colon2" ~ "ST-colon2_Unt",
+                                   sample =="ST-colon3" ~ "ST-colon3_Tre",
+                                   sample =="ST-colon4" ~ "ST-colon4_Tre",
+                                   sample =="ST-liver1" ~ "ST-liver1_Unt", 
+                                   sample =="ST-liver2" ~ "ST-liver2_Unt", 
+                                   sample =="ST-liver3" ~ "ST-liver3_Tre", 
+                                   sample =="ST-liver4" ~ "ST-liver4_Tre")) 
+
+
+
+  
+  
+results_STLiver_Korean_mainCellLines$sample <- 
+  factor(results_STLiver_Korean_mainCellLines$sample, 
+         levels = sort(unique(results_STLiver_Korean_mainCellLines$sample), decreasing = TRUE))
+
+
+p1 <- ggplot(results_STLiver_Korean_mainCellLines,aes(x = sample , y= cell_density_q05, fill = Cell_type)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="Major Cell \n\ type Proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.5,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 4))
+
+
+
+### Number of spots under tissue per sample
+df_spots_sample <- results_STLiver_Korean %>% dplyr::count(sample ) %>% 
+  dplyr::mutate(sample = case_when(sample == "ST-colon1" ~ "ST-colon1_Unt",
+                                   sample =="ST-colon2" ~ "ST-colon2_Unt",
+                                   sample =="ST-colon3" ~ "ST-colon3_Tre",
+                                   sample =="ST-colon4" ~ "ST-colon4_Tre",
+                                   sample =="ST-liver1" ~ "ST-liver1_Unt", 
+                                   sample =="ST-liver2" ~ "ST-liver2_Unt", 
+                                   sample =="ST-liver3" ~ "ST-liver3_Tre", 
+                                   sample =="ST-liver4" ~ "ST-liver4_Tre")) 
+  
+  
+df_spots_sample$sample <- 
+  factor(df_spots_sample$sample , 
+         levels = sort(unique(df_spots_sample$sample), decreasing = TRUE))
+
+p2 <- df_spots_sample %>% ggplot(aes(x=n, y=sample)) + geom_point(size=3, col="black") +
+  scale_x_continuous(trans = "log2", position = "bottom", breaks = c(3600,4096)) + 
+  theme(axis.title= element_blank(), axis.text.y = element_blank(), 
+        axis.ticks = element_blank(), panel.border = element_blank(),
+        panel.grid.minor = element_blank(), panel.grid.major.y =  element_blank(),
+        panel.grid.major.x = element_line(size=1, linetype=2, colour="Darkred"), 
+        plot.title = element_text(size=14, face = "bold", family="Arial", hjust = 0.5), 
+        axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1, vjust = 1)) + 
+  labs(title = "# Spots \n\ Under Tissue") 
+
+
+legend_p1 <- get_legend(p1)
+
+p1_nolegend <- p1 + theme(legend.position = "none")
+
+p1_nolegend + plot_spacer() + p2 + ggpubr::as_ggplot(legend_p1)+ plot_layout(widths = c(5,-0.35,2), heights = c(5,1))
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_STLiver_Korean_mainCellLines %>% 
+  dplyr::group_by(sample) %>% 
+  dplyr::mutate(Proportions = 
+    round(cell_density_q05  / sum(cell_density_q05 ) * 100, 
+    digits = 2)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::arrange(desc(sample), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+
+# CMS Tumors 
+
+```{r, warning=FALSE, message=FALSE}
+results_STLiver_Korean_CMS <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::inner_join(tumor_epithelial_cells, by="Cell_subtype") %>%
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise_all(funs(sum))
+
+
+ results_STLiver_Korean_CMS <- results_STLiver_Korean_CMS %>% 
+  dplyr::mutate(sample = case_when(sample == "ST-colon1" ~ "ST-colon1_Unt",
+                                   sample =="ST-colon2" ~ "ST-colon2_Unt",
+                                   sample =="ST-colon3" ~ "ST-colon3_Tre",
+                                   sample =="ST-colon4" ~ "ST-colon4_Tre",
+                                   sample =="ST-liver1" ~ "ST-liver1_Unt", 
+                                   sample =="ST-liver2" ~ "ST-liver2_Unt", 
+                                   sample =="ST-liver3" ~ "ST-liver3_Tre", 
+                                   sample =="ST-liver4" ~ "ST-liver4_Tre"))
+ 
+ results_STLiver_Korean_CMS$sample <- 
+  factor(results_STLiver_Korean_CMS$sample , 
+         levels = sort(unique(results_STLiver_Korean_CMS$sample), decreasing = TRUE))
+ 
+ p1_CMS <- ggplot(results_STLiver_Korean_CMS,aes(x = sample, y= cell_density_q05, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+  theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="CMSs \n\ Proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.5,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 2))
+
+### Compute the total number of spots with CMS signature (more than 20% of cells
+### in the spot are CMS)
+
+Total_content_spot_df <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::group_by(spot_id, sample) %>%
+  dplyr::summarise(Total_Content_spot= sum(cell_density_q05))  
+  # dplyr::mutate(sample = str_remove(sample, "^[^A]+"))
+
+CMS_content_spot_df <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::filter(Cell_subtype %in% tumor_epithelial_cells$Cell_subtype)  %>%
+  dplyr::group_by(spot_id, sample) %>%
+  dplyr::summarise(CMS_Content_spot= sum(cell_density_q05))  
+
+CMS_percentage_perSpot_df <- Total_content_spot_df %>%
+  dplyr::left_join(CMS_content_spot_df) %>%
+  dplyr::mutate(ratio = CMS_Content_spot/Total_Content_spot ) %>%
+  dplyr::filter(ratio > 0.20) %>% ungroup() %>%
+  dplyr::count(sample) %>%  
+  dplyr::mutate(sample = case_when(sample == "ST-colon1" ~ "ST-colon1_Unt",
+                                   sample =="ST-colon2" ~ "ST-colon2_Unt",
+                                   sample =="ST-colon3" ~ "ST-colon3_Tre",
+                                   sample =="ST-colon4" ~ "ST-colon4_Tre",
+                                   sample =="ST-liver1" ~ "ST-liver1_Unt", 
+                                   sample =="ST-liver2" ~ "ST-liver2_Unt", 
+                                   sample =="ST-liver3" ~ "ST-liver3_Tre", 
+                                   sample =="ST-liver4" ~ "ST-liver4_Tre"))
+ 
+  
+CMS_percentage_perSpot_df$sample <- 
+  factor(CMS_percentage_perSpot_df$sample , 
+         levels = sort(unique(CMS_percentage_perSpot_df$sample), decreasing = TRUE))
+
+p2_CMS <- CMS_percentage_perSpot_df %>% ggplot(aes(x=n, y=sample)) + geom_point(size=3, col="black") +
+  scale_x_continuous(trans = "log2", position = "bottom") + 
+  theme(axis.title= element_blank(), axis.text.y = element_blank(), 
+        axis.ticks = element_blank(), panel.border = element_blank(),
+        panel.grid.minor = element_blank(), panel.grid.major.y =  element_blank(),
+        panel.grid.major.x = element_line(size=1, linetype=2, colour="Darkred"), 
+        plot.title = element_text(size=14, face = "bold", family="Arial", hjust = 0.5), 
+        axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1, vjust = 1)) + 
+  labs(title="# CMS \n\ spots") 
+  
+legend_p1_CMS <- get_legend(p1_CMS)
+
+p1_CMS_nolegend <- p1_CMS + theme(legend.position = "none")
+
+CMS_plots <- p1_CMS_nolegend + p2_CMS + ggpubr::as_ggplot(legend_p1_CMS)+ plot_layout(widths = c(2.5, 1), heights = c(5,1)) + theme(axis.text.y = element_blank())
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+p1_CMS + plot_spacer() + p2_CMS + plot_layout(widths = c(5, -0.35 ,2),guides = "collect")& theme(legend.position = "bottom")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+results_STLiver_Korean_CMS %>% 
+  dplyr::group_by(sample) %>% 
+  dplyr::mutate(Proportions = 
+    round(cell_density_q05  / sum(cell_density_q05 ) * 100, 
+    digits = 2)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::arrange(desc(sample), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+```{r}
+p1_nolegend + plot_spacer() + p2 + 
+  p1_CMS_nolegend + theme(axis.text.y = element_blank()) + plot_spacer() + 
+  p2_CMS + 
+  ggpubr::as_ggplot(legend_p1)+ plot_spacer() + plot_spacer() +  
+  ggpubr::as_ggplot(legend_p1_CMS) + 
+  plot_layout(widths = c(5,-0.35,2,5,-0.35,2), heights = c(5,1))
+```
+
+
+# T cells
+
+```{r, warning=FALSE, message=FALSE}
+results_STLiver_Korean_T_cells  <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::inner_join(T_cells, by="Cell_subtype") %>%
+  dplyr::filter(Cell_subtype != "Unknown") %>%
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise_all(funs(sum))  
+
+ results_STLiver_Korean_T_cells <- results_STLiver_Korean_T_cells %>% 
+  dplyr::mutate(sample = case_when(sample == "ST-colon1" ~ "ST-colon1_Unt",
+                                   sample =="ST-colon2" ~ "ST-colon2_Unt",
+                                   sample =="ST-colon3" ~ "ST-colon3_Tre",
+                                   sample =="ST-colon4" ~ "ST-colon4_Tre",
+                                   sample =="ST-liver1" ~ "ST-liver1_Unt", 
+                                   sample =="ST-liver2" ~ "ST-liver2_Unt", 
+                                   sample =="ST-liver3" ~ "ST-liver3_Tre", 
+                                   sample =="ST-liver4" ~ "ST-liver4_Tre"))
+ 
+ results_STLiver_Korean_T_cells$sample <- 
+  factor(results_STLiver_Korean_T_cells$sample , 
+         levels = sort(unique(results_STLiver_Korean_T_cells$sample), decreasing = TRUE))
+ 
+ p1_T_cells <- ggplot(results_STLiver_Korean_T_cells,aes(x = sample , y= cell_density_q05, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+  theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="T-Cells \n\ Proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.5,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 3))
+
+
+
+### Compute the total number of spots with CMS signature (more than 25% of cells
+### in the spot are CMS)
+
+Total_content_spot_df <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::group_by(spot_id, sample) %>%
+  dplyr::summarise(Total_Content_spot= sum(cell_density_q05))  
+
+
+Tcells_content_spot_df <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::filter(Cell_subtype %in% T_cells$Cell_subtype)  %>%
+  dplyr::group_by(spot_id, sample) %>%
+  dplyr::summarise(Tcell_Content_spot= sum(cell_density_q05))  
+
+Tcells_percentage_perSpot_df <- Total_content_spot_df %>%
+  dplyr::left_join(Tcells_content_spot_df) %>%
+  dplyr::mutate(ratio = Tcell_Content_spot/Total_Content_spot ) %>%
+  dplyr::filter(ratio > 0.20) %>% ungroup() %>%
+  dplyr::count(sample) %>%  
+  dplyr::mutate(sample = case_when(sample == "ST-colon1" ~ "ST-colon1_Unt",
+                                   sample =="ST-colon2" ~ "ST-colon2_Unt",
+                                   sample =="ST-colon3" ~ "ST-colon3_Tre",
+                                   sample =="ST-colon4" ~ "ST-colon4_Tre",
+                                   sample =="ST-liver1" ~ "ST-liver1_Unt", 
+                                   sample =="ST-liver2" ~ "ST-liver2_Unt", 
+                                   sample =="ST-liver3" ~ "ST-liver3_Tre", 
+                                   sample =="ST-liver4" ~ "ST-liver4_Tre"))
+
+Tcells_percentage_perSpot_df$sample <- 
+  factor(Tcells_percentage_perSpot_df$sample , 
+         levels = sort(unique(Tcells_percentage_perSpot_df$sample), decreasing = TRUE))
+
+p2_Tcells <- Tcells_percentage_perSpot_df %>% ggplot(aes(x=n, y=sample)) + geom_point(size=3, col="black") +
+  scale_x_continuous(trans = "log2", position = "bottom", breaks = c(64,256,1024)) + 
+  theme(axis.title= element_blank(), axis.text.y = element_blank(), 
+        axis.ticks = element_blank(), panel.border = element_blank(),
+        panel.grid.minor = element_blank(), panel.grid.major.y =  element_blank(),
+        panel.grid.major.x = element_line(size=1, linetype=2, colour="Darkred"), 
+        plot.title = element_text(size=14, face = "bold", family="Arial", hjust = 0.5), 
+        axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1, vjust = 1)) + 
+  labs(title="# T-cells \n\ spots") 
+
+
+legend_T_cells <- get_legend(p1_T_cells)
+
+p1_T_cells_nolegend <- p1_T_cells + theme(legend.position = "none") 
+
+T_cells_plots <- p1_T_cells_nolegend + p2_Tcells + ggpubr::as_ggplot(legend_T_cells)+ plot_layout(widths = c(2.5,1), heights = c(5,1))
+
+p1_T_cells_nolegend + plot_spacer() + p2_Tcells + 
+  plot_layout(widths = c(5, -0.35 ,2),guides = "collect")& theme(legend.position = "bottom")
+
+```
+
+# B_cells 
+
+```{r, warning=FALSE, message=FALSE}
+results_STLiver_Korean_B_cells  <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::inner_join(B_cells, by="Cell_subtype") %>%
+  dplyr::filter(Cell_subtype != "Unknown") %>%
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise_all(funs(sum))  
+  
+
+results_STLiver_Korean_B_cells <- 
+  results_STLiver_Korean_B_cells %>% 
+  dplyr::mutate(sample = case_when(sample == "ST-colon1" ~ "ST-colon1_Unt",
+                                   sample =="ST-colon2" ~ "ST-colon2_Unt",
+                                   sample =="ST-colon3" ~ "ST-colon3_Tre",
+                                   sample =="ST-colon4" ~ "ST-colon4_Tre",
+                                   sample =="ST-liver1" ~ "ST-liver1_Unt", 
+                                   sample =="ST-liver2" ~ "ST-liver2_Unt", 
+                                   sample =="ST-liver3" ~ "ST-liver3_Tre", 
+                                   sample =="ST-liver4" ~ "ST-liver4_Tre"))
+
+  
+
+results_STLiver_Korean_B_cells$sample <- 
+  factor(results_STLiver_Korean_B_cells$sample , 
+         levels = sort(unique(results_STLiver_Korean_B_cells$sample), decreasing = TRUE))
+
+
+p1_B_cells <- ggplot(results_STLiver_Korean_B_cells,aes(x = sample , y= cell_density_q05, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+  theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="B-Cells \n\ Proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.5,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 2))
+
+
+
+### Compute the total number of spots with CMS signature (more than 25% of cells
+### in the spot are CMS)
+
+Total_content_spot_df <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::group_by(spot_id, sample) %>%
+  dplyr::summarise(Total_Content_spot= sum(cell_density_q05))  
+# dplyr::mutate(sample = str_remove(sample, "^[^A]+"))
+
+Bcells_content_spot_df <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::filter(Cell_subtype %in% B_cells$Cell_subtype)  %>%
+  dplyr::group_by(spot_id, sample) %>%
+  dplyr::summarise(Bcell_Content_spot= sum(cell_density_q05))  
+
+Bcells_percentage_perSpot_df <- Total_content_spot_df %>%
+  dplyr::left_join(Bcells_content_spot_df) %>%
+  dplyr::mutate(ratio = Bcell_Content_spot/Total_Content_spot ) %>%
+  dplyr::filter(ratio > 0.20) %>% ungroup() %>%
+  dplyr::count(sample) %>%  
+  dplyr::mutate(sample = case_when(sample == "ST-colon1" ~ "ST-colon1_Unt",
+                                   sample =="ST-colon2" ~ "ST-colon2_Unt",
+                                   sample =="ST-colon3" ~ "ST-colon3_Tre",
+                                   sample =="ST-colon4" ~ "ST-colon4_Tre",
+                                   sample =="ST-liver1" ~ "ST-liver1_Unt", 
+                                   sample =="ST-liver2" ~ "ST-liver2_Unt", 
+                                   sample =="ST-liver3" ~ "ST-liver3_Tre", 
+                                   sample =="ST-liver4" ~ "ST-liver4_Tre"))
+
+  
+
+Bcells_percentage_perSpot_df$sample <- 
+  factor(Bcells_percentage_perSpot_df$sample , 
+         levels = sort(unique(Bcells_percentage_perSpot_df$sample), decreasing = TRUE))
+
+p2_Bcells <- Bcells_percentage_perSpot_df %>% ggplot(aes(x=n, y=sample)) + geom_point(size=3, col="black") +
+  scale_x_continuous(trans = "log2", position = "bottom") + 
+  theme(axis.title= element_blank(), axis.text.y = element_blank(), 
+        axis.ticks = element_blank(), panel.border = element_blank(),
+        panel.grid.minor = element_blank(), panel.grid.major.y =  element_blank(),
+        panel.grid.major.x = element_line(size=1, linetype=2, colour="Darkred"), 
+        plot.title = element_text(size=14, face = "bold", family="Arial", hjust = 0.5), 
+        axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1, vjust = 1)) + 
+  labs(title="# B-cells \n\ spots") 
+
+
+
+legend_B_cells <- get_legend(p1_B_cells)
+
+p1_B_cells_nolegend <- p1_B_cells + theme(legend.position = "none") 
+
+p1_B_cells_nolegend + p2_Bcells + ggpubr::as_ggplot(legend_B_cells)+ plot_layout(widths = c(2.5, 1), heights = c(5,1))
+```
+
+
+
+# Myeloid cells
+
+```{r, warning=FALSE, message=FALSE}
+results_STLiver_Korean_Myeloid_cells  <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::inner_join(myeloid_cells, by="Cell_subtype") %>%
+  dplyr::filter(Cell_subtype != "Unknown") %>%
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise_all(funs(sum))  
+  
+
+
+results_STLiver_Korean_Myeloid_cells <- 
+  results_STLiver_Korean_Myeloid_cells %>% 
+  dplyr::mutate(sample = case_when(sample == "ST-colon1" ~ "ST-colon1_Unt",
+                                   sample =="ST-colon2" ~ "ST-colon2_Unt",
+                                   sample =="ST-colon3" ~ "ST-colon3_Tre",
+                                   sample =="ST-colon4" ~ "ST-colon4_Tre",
+                                   sample =="ST-liver1" ~ "ST-liver1_Unt", 
+                                   sample =="ST-liver2" ~ "ST-liver2_Unt", 
+                                   sample =="ST-liver3" ~ "ST-liver3_Tre", 
+                                   sample =="ST-liver4" ~ "ST-liver4_Tre"))
+
+  
+  
+results_STLiver_Korean_Myeloid_cells$sample <- 
+  factor(results_STLiver_Korean_Myeloid_cells$sample , 
+         levels = sort(unique(results_STLiver_Korean_Myeloid_cells$sample), decreasing = TRUE))
+
+p1_Myeloid_cells <- ggplot(results_STLiver_Korean_Myeloid_cells,aes(x = sample , y= cell_density_q05, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+  theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="Myeloid Cells \n\ Proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.5,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 2))
+
+
+### Compute the total number of spots with CMS signature (more than 25% of cells
+### in the spot are CMS)
+
+Total_content_spot_df <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::group_by(spot_id, sample) %>%
+  dplyr::summarise(Total_Content_spot= sum(cell_density_q05))  
+# dplyr::mutate(sample = str_remove(sample, "^[^A]+"))
+
+MyeloidCells_content_spot_df <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::filter(Cell_subtype %in% myeloid_cells$Cell_subtype)  %>%
+  dplyr::group_by(spot_id, sample) %>%
+  dplyr::summarise(Bcell_Content_spot= sum(cell_density_q05))  
+
+MyeloidCells_percentage_perSpot_df <- Total_content_spot_df %>%
+  dplyr::left_join(MyeloidCells_content_spot_df) %>%
+  dplyr::mutate(ratio = Bcell_Content_spot/Total_Content_spot ) %>%
+  dplyr::filter(ratio > 0.20) %>% ungroup() %>%
+  dplyr::count(sample) %>%  
+  dplyr::mutate(sample = case_when(sample == "ST-colon1" ~ "ST-colon1_Unt",
+                                   sample =="ST-colon2" ~ "ST-colon2_Unt",
+                                   sample =="ST-colon3" ~ "ST-colon3_Tre",
+                                   sample =="ST-colon4" ~ "ST-colon4_Tre",
+                                   sample =="ST-liver1" ~ "ST-liver1_Unt", 
+                                   sample =="ST-liver2" ~ "ST-liver2_Unt", 
+                                   sample =="ST-liver3" ~ "ST-liver3_Tre", 
+                                   sample =="ST-liver4" ~ "ST-liver4_Tre"))
+
+  
+  
+MyeloidCells_percentage_perSpot_df$sample <- 
+  factor(MyeloidCells_percentage_perSpot_df$sample , 
+         levels = sort(unique(MyeloidCells_percentage_perSpot_df$sample), decreasing = TRUE))
+
+p2_MyeloidCells <- MyeloidCells_percentage_perSpot_df %>% ggplot(aes(x=n, y=sample)) + geom_point(size=3, col="black") +
+  scale_x_continuous(trans = "log2", position = "bottom") + 
+  theme(axis.title= element_blank(), axis.text.y = element_blank(), 
+        axis.ticks = element_blank(), panel.border = element_blank(),
+        panel.grid.minor = element_blank(), panel.grid.major.y =  element_blank(),
+        panel.grid.major.x = element_line(size=1, linetype=2, colour="Darkred"), 
+        plot.title = element_text(size=14, face = "bold", family="Arial", hjust = 0.5), 
+        axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1, vjust = 1)) + 
+  labs(title="# Myeloid \n\ cells spots") 
+
+
+legend_Myeloid_cells <- get_legend(p1_Myeloid_cells)
+
+p1_Myeloid_cells_nolegend <- p1_Myeloid_cells + theme(legend.position = "none") 
+
+p1_Myeloid_cells_nolegend + p2_MyeloidCells + ggpubr::as_ggplot(legend_Myeloid_cells)+ plot_layout(widths = c(2.5, 1), heights = c(5,1))
+
+```
+
+
+# Main Stromal cells. 
+
+```{r, warning=FALSE, message=FALSE}
+results_STLiver_Korean_stromal_cells  <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::filter(Cell_subtype %in% c("Myofibroblasts","Stromal 1","Stromal 2","Stromal 3")) %>%
+  dplyr::filter(Cell_subtype != "Unknown") %>%
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  summarise_all(funs(sum))  
+  
+
+results_STLiver_Korean_stromal_cells <- 
+  results_STLiver_Korean_stromal_cells %>% 
+  dplyr::mutate(sample = case_when(sample == "ST-colon1" ~ "ST-colon1_Unt",
+                                   sample =="ST-colon2" ~ "ST-colon2_Unt",
+                                   sample =="ST-colon3" ~ "ST-colon3_Tre",
+                                   sample =="ST-colon4" ~ "ST-colon4_Tre",
+                                   sample =="ST-liver1" ~ "ST-liver1_Unt", 
+                                   sample =="ST-liver2" ~ "ST-liver2_Unt", 
+                                   sample =="ST-liver3" ~ "ST-liver3_Tre", 
+                                   sample =="ST-liver4" ~ "ST-liver4_Tre"))
+
+
+
+results_STLiver_Korean_stromal_cells$sample <- 
+  factor(results_STLiver_Korean_stromal_cells$sample , 
+         levels = sort(unique(results_STLiver_Korean_stromal_cells$sample), decreasing = TRUE))
+
+
+p1_stromal_cells <- ggplot(results_STLiver_Korean_stromal_cells,aes(x = sample , y= cell_density_q05, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+  theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="Stromal Cells \n\ Proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.5,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 2))
+
+### Compute the total number of spots with CMS signature (more than 25% of cells
+### in the spot are CMS)
+
+Total_content_spot_df <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::group_by(spot_id, sample) %>%
+  dplyr::summarise(Total_Content_spot= sum(cell_density_q05))  
+# dplyr::mutate(sample = str_remove(sample, "^[^A]+"))
+
+StromalCells_content_spot_df <- results_STLiver_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::filter(Cell_subtype %in% c("Myofibroblasts","Stromal 1","Stromal 2","Stromal 3"))  %>%
+  dplyr::group_by(spot_id, sample) %>%
+  dplyr::summarise(StromalCell_Content_spot= sum(cell_density_q05))  
+
+StromalCells_percentage_perSpot_df <- Total_content_spot_df %>%
+  dplyr::left_join(StromalCells_content_spot_df) %>%
+  dplyr::mutate(ratio = StromalCell_Content_spot/Total_Content_spot ) %>%
+  dplyr::filter(ratio > 0.20) %>% ungroup() %>%
+  dplyr::count(sample) %>%  
+  dplyr::mutate(sample = case_when(sample == "ST-colon1" ~ "ST-colon1_Unt",
+                                   sample =="ST-colon2" ~ "ST-colon2_Unt",
+                                   sample =="ST-colon3" ~ "ST-colon3_Tre",
+                                   sample =="ST-colon4" ~ "ST-colon4_Tre",
+                                   sample =="ST-liver1" ~ "ST-liver1_Unt", 
+                                   sample =="ST-liver2" ~ "ST-liver2_Unt", 
+                                   sample =="ST-liver3" ~ "ST-liver3_Tre", 
+                                   sample =="ST-liver4" ~ "ST-liver4_Tre"))
+
+  
+  
+StromalCells_percentage_perSpot_df$sample <- 
+  factor(StromalCells_percentage_perSpot_df$sample , 
+         levels = sort(unique(StromalCells_percentage_perSpot_df$sample), decreasing = TRUE))
+
+
+p2_StromalCells <- StromalCells_percentage_perSpot_df %>% ggplot(aes(x=n, y=sample)) + geom_point(size=3, col="black") +
+  scale_x_continuous(trans = "log2", position = "bottom", breaks = c(8,128,1024)) + 
+  theme(axis.title= element_blank(), axis.text.y = element_blank(), 
+        axis.ticks = element_blank(), panel.border = element_blank(),
+        panel.grid.minor = element_blank(), panel.grid.major.y =  element_blank(),
+        panel.grid.major.x = element_line(size=1, linetype=2, colour="Darkred"), 
+        plot.title = element_text(size=14, face = "bold", family="Arial", hjust = 0.5), 
+        axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1, vjust = 1)) + 
+  labs(title="# Stromal \n\ cells spots") 
+
+legend_Stromal_cells <- get_legend(p1_stromal_cells)
+
+p1_stromal_cells_nolegend <- p1_stromal_cells + theme(legend.position = "none") 
+
+p1_stromal_cells_nolegend + p2_StromalCells + ggpubr::as_ggplot(legend_Stromal_cells)+ plot_layout(widths = c(2.5, 1), heights = c(5,1))
+```
+
+
+
+
+
+# Conclusion 
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

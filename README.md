@@ -6,7 +6,7 @@ We processed fresh-frozen resection samples obtained from seven CRC patients for
 
 This repository contains the scripts developed for the analysis of this set of CRC samples which results are presented in the following publication: 
 
-XXXXXXXXXX
+**_"Charting the Heterogeneity of Colorectal Cancer Consensus Molecular Subtypes using Spatial Transcriptomics"_**
 
 and it is organized as follows:
 
@@ -19,7 +19,15 @@ and it is organized as follows:
 * Additional analaysis of the external ST CRC samples
 * Wrapper Functions
 
-The raw data (count matrices, H&E figures...) and the intermediates files generated during the analysis and required to re-run the analysis are available in zenodo.   
+The raw data (count matrices, H&E figures...) and the intermediates files generated during the analysis and required to re-run the analysis are available at zenodo: 
+
+[https://doi.org/10.5281/zenodo.7551712](https://doi.org/10.5281/zenodo.7551712)
+
+The notebooks associated with the scripts deposit in this repository are also available at zenodo: 
+
+[https://doi.org/10.5281/zenodo.7440182](https://doi.org/10.5281/zenodo.7440182)
+
+
 
 
 

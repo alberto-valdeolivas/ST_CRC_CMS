@@ -12,9 +12,9 @@ bioRxiv, 2023; doi: https://doi.org/10.1101/2023.01.23.525135_
 
 and it is organized as follows:
 
-* Quality Control
-* Deconvolution
-* Sample Characterization 
+* (Quality Control)[https://github.com/alberto-valdeolivas/ST_CRC_CMS/tree/main/Quality_Control]: Scripts to evaluate the global QC metrics compared across samples and batches. We also compare the number of reads in spots covered and non-covered by tissue to investigate potential contamination. 
+* (Deconvolution)[https://github.com/alberto-valdeolivas/ST_CRC_CMS/tree/main/Deconvolution]: Scripts to perform the deconvolution in the different ST datasets and using the two different available scRNA-seq references (Korean and Belgian cohort).
+* (Sample Characterization)[https://github.com/alberto-valdeolivas/ST_CRC_CMS/tree/main/Sample_Characterization]: Scripts to characterize the internal and external ST CRC datasets used in our manuscript based on different criteria.
 * General Analysis per Sample
 * General Integrated analysis
 * Figure arrangement 

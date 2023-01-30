@@ -6,7 +6,9 @@ We processed fresh-frozen resection samples obtained from seven CRC patients for
 
 This repository contains the scripts developed for the analysis of this set of CRC samples which results are presented in the following publication: 
 
-**_"Charting the Heterogeneity of Colorectal Cancer Consensus Molecular Subtypes using Spatial Transcriptomics"_**
+[**"Charting the Heterogeneity of Colorectal Cancer Consensus Molecular Subtypes using Spatial Transcriptomics"**](https://www.biorxiv.org/content/10.1101/2023.01.23.525135v1.abstract)
+_Alberto Valdeolivas, Bettina Amberg, Nicolas Giroud, Marion Richardson, Eric J.C. Gálvez, Solveig Badillo, Alice Julien-Laferrière, Demeter Turos, Lena Voith von Voithenberg, Isabelle Wells, Amy A. Lo, Emilio Yángüez, Meghna Das Thakur, Michael Bscheider, Marc Sultan, Nadine Kumpesa, Björn Jacobsen, Tobias Bergauer, Julio Saez-Rodriguez, Sven Rottenberg, Petra C. Schwalie, Kerstin Hahn
+bioRxiv 2023.01.23.525135; doi: https://doi.org/10.1101/2023.01.23.525135_
 
 and it is organized as follows:
 

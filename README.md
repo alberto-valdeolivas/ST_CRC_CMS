@@ -15,7 +15,7 @@ and it is organized as follows:
 * [Quality Control](https://github.com/alberto-valdeolivas/ST_CRC_CMS/tree/main/Quality_Control): Scripts to evaluate the global QC metrics compared across samples and batches. We also compare the number of reads in spots covered and non-covered by tissue to investigate potential contamination. 
 * [Deconvolution](https://github.com/alberto-valdeolivas/ST_CRC_CMS/tree/main/Deconvolution): Scripts to perform the deconvolution in the different ST datasets and using the two different available scRNA-seq references (Korean and Belgian cohort).
 * [Sample Characterization](https://github.com/alberto-valdeolivas/ST_CRC_CMS/tree/main/Sample_Characterization): Scripts to characterize the internal and external ST CRC datasets used in our manuscript based on different criteria.
-* [General Analysis per Sample]: Scripts to perform analysis, such as clustering, pathway and TF activity, individually on each sample. 
+* [General Analysis per Sample](https://github.com/alberto-valdeolivas/ST_CRC_CMS/tree/main/General_Analysis_perSample): Scripts to perform analysis, such as clustering, pathway and TF activity, individually on each sample. 
 * General Integrated analysis
 * Figure arrangement 
 * Additional analaysis of the external ST CRC samples

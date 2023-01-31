@@ -1,0 +1,598 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Proportion Plots"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(readr)
+library(stringr)
+library(purrr)
+library(cowplot)
+library(ggpubr)
+
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_folder <- "IntermediaryFiles/"
+input_names_1 <- "SeuratList_Clusters_Res05.rds"
+input_names_2 <- "Patho_Annotations/"
+
+files_to_read_1 <- paste0(data_directory, analysis_name,input_folder,input_names_1)
+files_to_read_2 <- paste0(data_directory, analysis_name,input_folder,input_names_2)
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+
+## We consider all the samples but the one with low QC results
+samples_to_consider <- c("SN048_A121573_Rep1","SN048_A121573_Rep2",
+  "SN048_A416371_Rep1", "SN048_A416371_Rep2", "SN123_A551763_Rep1",
+  "SN123_A595688_Rep1", "SN123_A798015_Rep1", "SN123_A938797_Rep1_X",
+  "SN124_A595688_Rep2", "SN124_A798015_Rep2",
+  "SN124_A938797_Rep2", "SN84_A120838_Rep1", "SN84_A120838_Rep2" )
+```
+
+We include pathologist annotations into Seurat objects
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read_1)
+seurat_objects <- seurat_objects[samples_to_consider]
+
+seurat_objects_patho <- 
+  lapply(seurat_objects, function(x){
+    current_sample <- unique(x@meta.data$orig.ident)
+    
+    patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".csv"))
+    
+    colnames(patho_anno_current_sample) <- c("Barcode", "Pathologist_Annotations")
+    
+    x@meta.data <- x@meta.data %>%
+      tibble::rownames_to_column("spot_id") %>%
+      dplyr::left_join(patho_anno_current_sample, by = c("spot_id" = "Barcode")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "tumor&stroma IC med to high", "tumor&stroma_IC med to high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "epitehlium&submucosa", "epithelium&submucosa")) %>% 
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggregate submucosa", "IC aggregate_submucosa")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggregregate_submucosa", "IC aggregate_submucosa")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggreates_stroma or muscularis", "IC aggregate_stroma or muscularis")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggragate_stroma or muscularis", "IC aggregate_stroma or muscularis")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggreates_stroma or muscularis", "IC aggregate_stroma or muscularis")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggregate_muscularis or stroma", "IC aggregate_stroma or muscularis")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma desmoplastic_IC low", "stroma_desmoplastic_IC low")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma desmoplastic_IC med to high", "stroma_desmoplastic_IC med to high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma_fibroblastic_IC high", "stroma_fibroblastic_IC_high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma_fibroblastic_IC med", "stroma_fibroblastic_IC_med")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma_fibroblastic_IC_med", "stroma_fibroblastic_IC med to high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma_fibroblastic_IC_high", "stroma_fibroblastic_IC med to high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "submucosa", "lamina propria")) %>% 
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "epithelium&submucosa", "epithelium&lam propria")) %>% 
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggregate_submucosa", "IC aggregate_lam propria")) %>% 
+      tibble::column_to_rownames("spot_id") 
+      
+    
+    saveRDS(object = x@meta.data %>%
+      tibble::rownames_to_column("spot_id"), 
+            file =  paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".rds"))
+              
+    Idents(x) <- 'Pathologist_Annotations'
+    
+    return(x)
+})
+
+```
+
+We visualize the global number of spots with the different annotations
+
+```{r, warning=FALSE, message=FALSE}
+all_annotations <- 
+  unlist(lapply(seurat_objects_patho, function(x){x@meta.data$Pathologist_Annotations}))
+table(all_annotations)
+
+list_all_annotations <- 
+  lapply(seurat_objects_patho, function(x){unique(x@meta.data$Pathologist_Annotations)})
+  
+table(unlist(list_all_annotations))
+
+selected_annotations <- names(which(table(unlist(list_all_annotations)) > 2))
+selected_annotations <- selected_annotations[selected_annotations != "exclude"]
+
+seurat_objects_patho_merge <- 
+  merge(x= seurat_objects_patho[[1]],y=seurat_objects_patho[-1])
+```
+
+Then, we read cell2location results, to explore the cell type content/abundance 
+of this tumor annotated spots
+
+```{r, warning=FALSE, message=FALSE}
+filename_results_C2L_Korean <- paste0(data_directory, analysis_name, "Cell2Location/results/LocationModelLinearDependentWMultiExperiment_14experiments_36clusters_20654locations_4188genes/W_cell_density_q05.csv")
+  
+results_C2L_Korean <- read_csv(filename_results_C2L_Korean) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern = "Count_")) 
+  
+colnames(results_C2L_Korean) <-
+  str_replace(colnames(results_C2L_Korean), 
+              pattern = "q05_spot_factors", replacement = "")
+
+results_C2L_Korean <- results_C2L_Korean %>% 
+  dplyr::mutate(sample = str_extract(.$spot_id, pattern =".*Rep[1-2]")) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern =".*Rep[1-2]_")) %>%
+  dplyr::mutate(spot_id = str_remove(spot_id, pattern = "^X_")) %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") 
+```
+
+We then match the spots annotated as tumors with the results of cell2location
+
+```{r, warning=FALSE, message=FALSE}
+spots_annotations <- seurat_objects_patho_merge@meta.data %>% 
+  dplyr::select(orig.ident, Pathologist_Annotations) %>% 
+  tibble::rownames_to_column(var = "spot_id") %>%
+  dplyr::mutate(spot_id = str_remove(spot_id, "_[0-9]+")) %>% 
+  dplyr::mutate(orig.ident = str_replace(orig.ident, "SN123_A938797_Rep1_X", "SN123_A938797_Rep1")) %>% 
+  # dplyr::filter(!is.na(Pathologist_Annotations)) %>% 
+  dplyr::filter(Pathologist_Annotations %in%  selected_annotations)
+
+df_C2L_Proportions_annotatedspots <- results_C2L_Korean %>% 
+  dplyr::mutate(Cell_subtype = str_replace(Cell_subtype, "CMS[1-4]", "Tumor cells")) %>%
+  dplyr::inner_join(spots_annotations, by = c("spot_id" = "spot_id", "sample" = "orig.ident")) %>% 
+  dplyr::select(spot_id, sample, cell_density_q05, Cell_subtype, Pathologist_Annotations) %>%
+  dplyr::mutate(spot_sample_id = paste0(sample, "_", spot_id)) %>% 
+  dplyr::group_by(spot_sample_id) %>% 
+  dplyr::mutate(Proportions_perSpot = cell_density_q05/sum(cell_density_q05)) %>%
+  dplyr::ungroup()
+
+avg_proportion_annotations <- results_C2L_Korean %>%
+  dplyr::mutate(Cell_subtype = str_replace(Cell_subtype, "CMS[1-4]", "Tumor cells")) %>%
+  dplyr::inner_join(spots_annotations, by = c("spot_id" = "spot_id", "sample" = "orig.ident")) %>% 
+  dplyr::select(spot_id, sample, cell_density_q05, Cell_subtype, Pathologist_Annotations) %>%
+  dplyr::mutate(spot_sample_id = paste0(sample, "_", spot_id)) %>% 
+  dplyr::group_by(spot_sample_id) %>% 
+  dplyr::mutate(Proportions_perSpot = cell_density_q05/sum(cell_density_q05)) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(Pathologist_Annotations, Cell_subtype) %>% 
+  dplyr::mutate(avg_proportion_cell_annotations = mean(Proportions_perSpot)) %>%
+  dplyr::distinct(Cell_subtype, avg_proportion_cell_annotations)
+```
+
+```{r, warning=FALSE, message=FALSE, eval=FALSE}
+n_random <- 10000
+all_patho_annotations <- unique(spots_annotations$Pathologist_Annotations)
+df_final <- data.frame()
+  
+for (i in seq(n_random)){
+    
+  df_random <- df_C2L_Proportions_annotatedspots %>%
+    dplyr::mutate(rand_proportions = base::sample(Proportions_perSpot)) %>%
+    dplyr::group_by(Pathologist_Annotations, Cell_subtype) %>% 
+    dplyr::mutate(avg_proportion_random = mean(rand_proportions)) %>%
+    dplyr::distinct(Cell_subtype, avg_proportion_random)
+  
+  df_random_real <- df_random %>% 
+    dplyr::inner_join(avg_proportion_annotations, 
+      by = c("Cell_subtype", "Pathologist_Annotations")) %>%
+    dplyr::mutate(difference_real_random = avg_proportion_cell_annotations - avg_proportion_random) %>%
+    dplyr::select(Pathologist_Annotations, Cell_subtype, difference_real_random)
+     
+  df_final <- rbind(df_final, df_random_real)
+}  
+  
+df_all <-df_final %>% dplyr::group_by(Pathologist_Annotations, Cell_subtype) %>% 
+  dplyr::mutate(NES = mean(difference_real_random)/sd(difference_real_random)) %>% 
+  dplyr::distinct(Pathologist_Annotations, Cell_subtype, NES)
+
+saveRDS(df_all, 
+  paste0(data_directory, analysis_name, input_folder, "df_enrichment_depletion_analysis.rds"))
+```
+
+## Overall plot with all the samples and annotations 
+
+```{r, warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+df_all <- 
+  readRDS(paste0(data_directory, analysis_name, input_folder, "df_enrichment_depletion_analysis.rds"))
+
+cells_to_non_visualize <- c("Unknown")
+
+final_df_avg_toplot<- df_all %>% 
+  dplyr::filter(!(Cell_subtype %in% cells_to_non_visualize)) %>% 
+  dplyr::mutate(Direction = ifelse(NES >= 0, "Enrichment", "Depletion"))
+
+final_df_avg_toplot$Pathologist_Annotations <- 
+  factor(final_df_avg_toplot$Pathologist_Annotations , 
+         levels = rev(c("non neo epithelium", "lamina propria", 
+          "epithelium&lamina propria", 
+          "muscularis_IC med to high", "tumor", "tumor&stroma_IC med to high", 
+          "stroma_fibroblastic_IC med to high", "IC aggregate_lamina propria", 
+          "IC aggregate_stroma or muscularis")))
+
+final_df_avg_toplot$Cell_subtype <- 
+  factor(final_df_avg_toplot$Cell_subtype , 
+         levels = c("Mature Enterocytes type 1", "Mature Enterocytes type 2", 
+        "Goblet cells", "Stem-like/TA", "Intermediate", 
+        "Smooth muscle cells", "Tumor cells", "Myofibroblasts", 
+        "Stromal 1", "Stromal 2", "Stromal 3", "Tip-like ECs", "Stalk-like ECs",
+        "Proliferative ECs", "Lymphatic ECs", "Pericytes", "Enteric glial cells",
+        "SPP1+", "Pro-inflammatory", "Proliferating", "cDC", "CD19+CD20+ B", 
+        "IgA+ Plasma", "IgG+ Plasma", "CD4+ T cells", "CD8+ T cells", "Regulatory T cells", 
+        "T follicular helper cells", "T helper 17 cells", "gamma delta T cells", 
+        "NK cells", "Mast cells"))
+
+enrichment_depletion_plot <- 
+  ggplot(final_df_avg_toplot, aes(x = Pathologist_Annotations, 
+    y = Cell_subtype, colour = Direction, size = abs(NES))) + 
+    geom_point() + 
+    scale_size_continuous(range = c(1.5, 9.5), breaks = c(5,35), labels = c("Small","Large")) + theme_bw() + 
+    theme(axis.title = element_blank(), 
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1),
+          axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+          plot.title =  element_text(face="bold", size=14, hjust = 0.5) , 
+          legend.position ="right", legend.text = element_text(size=10, face="bold", family="Arial"),
+          legend.title =  element_text(size=12, face="bold", family="Arial")) +
+          scale_color_manual(values = c( "#377EB8", "#E41A1C")) + 
+          coord_flip() + 
+          guides(col = guide_legend(order = 1, override.aes = list(size = 5)),  
+          size =guide_legend(title = "Size Effect", order =2, override.aes = list(size = c(3.5,7.5)))) +
+          labs(title ="Enrichment \n\ Depletion") 
+enrichment_depletion_plot
+# ggsave(filename = "/pstore/home/valdeola/Figure1_EnrichmentDepletionPlot.tiff", device='tiff', dpi=300)
+```
+
+
+```{r, warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+enrichment_depletion_plot_V2 <- 
+  ggplot(final_df_avg_toplot, aes(x = Pathologist_Annotations, 
+    y = Cell_subtype, colour = Direction, size = abs(NES))) + 
+    geom_point() + 
+    #scale_size_continuous(range = c(1.5, 9.5), breaks = c(5,35), labels = c("Small","Large")) 
+    theme_bw() + 
+    theme(axis.title = element_blank(), 
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1),
+          axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+          plot.title =  element_text(face="bold", size=14, hjust = 0.5) , 
+          legend.position ="right", legend.text = element_text(size=10, face="bold", family="Arial"),
+          legend.title =  element_text(size=12, face="bold", family="Arial")) +
+          scale_color_manual(values = c( "#377EB8", "#E41A1C")) + 
+          coord_flip() + 
+          guides(col = guide_legend(title = "Effect", order = 1, override.aes = list(size = 5)),  
+          size =guide_legend(title = "Enrichment Score", order =2)) 
+          # labs(title ="Enrichment \n\ Depletion") 
+enrichment_depletion_plot_V2
+ggsave(filename = "home/valdeola/Desktop/Figure1_EnrichmentDepletionPlot_V2.tiff", device='tiff', dpi=300)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+ggballoonplot(final_df_avg_toplot, fill = "NES") +
+  scale_fill_gradient2(low = "#377EB8",mid = "white",high = "#E41A1C") + 
+  theme(axis.title = element_blank(), 
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1),
+          axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+          plot.title =  element_text(face="bold", size=14, hjust = 0.5) , 
+          legend.position ="right", legend.text = element_text(size=10, face="bold", family="Arial"),
+          legend.title =  element_text(size=12, face="bold", family="Arial")) + 
+          
+  
+  coord_flip()
+```
+
+
+## Plot considering only CMS2 
+
+```{r, warning=FALSE, message=FALSE}
+samples_to_consider_CMS2 <- c("SN048_A121573_Rep1", "SN048_A121573_Rep2", 
+  "SN123_A595688_Rep1", "SN123_A938797_Rep1", "SN124_A595688_Rep2", 
+  "SN124_A938797_Rep2", "SN84_A120838_Rep1", "SN84_A120838_Rep2")
+
+spots_annotations_CMS2 <- seurat_objects_patho_merge@meta.data %>% 
+  dplyr::select(orig.ident, Pathologist_Annotations) %>% 
+  tibble::rownames_to_column(var = "spot_id") %>%
+  dplyr::mutate(spot_id = str_remove(spot_id, "_[0-9]+")) %>% 
+  dplyr::mutate(orig.ident = str_replace(orig.ident, "SN123_A938797_Rep1_X", "SN123_A938797_Rep1")) %>% 
+  dplyr::filter(!is.na(Pathologist_Annotations)) %>% 
+  dplyr::filter(Pathologist_Annotations !=  "exclude") %>% 
+  # dplyr::filter(Pathologist_Annotations %in%  selected_annotations) %>% 
+  dplyr::filter(orig.ident %in% samples_to_consider_CMS2)
+
+df_C2L_Proportions_annotatedspots_CMS2 <- results_C2L_Korean %>%
+  dplyr::inner_join(spots_annotations_CMS2, by = c("spot_id" = "spot_id", "sample" = "orig.ident")) %>% 
+  dplyr::select(spot_id, sample, cell_density_q05, Cell_subtype, Pathologist_Annotations) %>%
+  dplyr::mutate(spot_sample_id = paste0(sample, "_", spot_id)) %>% 
+  dplyr::group_by(spot_sample_id) %>% 
+  dplyr::mutate(Proportions_perSpot = cell_density_q05/sum(cell_density_q05)) %>%
+  dplyr::ungroup()
+
+avg_proportion_annotations_CMS2 <- results_C2L_Korean %>%
+  dplyr::inner_join(spots_annotations_CMS2, by = c("spot_id" = "spot_id", "sample" = "orig.ident")) %>% 
+  dplyr::select(spot_id, sample, cell_density_q05, Cell_subtype, Pathologist_Annotations) %>%
+  dplyr::mutate(spot_sample_id = paste0(sample, "_", spot_id)) %>% 
+  dplyr::group_by(spot_sample_id) %>% 
+  dplyr::mutate(Proportions_perSpot = cell_density_q05/sum(cell_density_q05)) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(Pathologist_Annotations, Cell_subtype) %>% 
+  dplyr::mutate(avg_proportion_cell_annotations = mean(Proportions_perSpot)) %>%
+  dplyr::distinct(Cell_subtype, avg_proportion_cell_annotations)
+```
+
+```{r, warning=FALSE, message=FALSE, eval=FALSE}
+n_random <- 10000
+df_final_CMS2 <- data.frame()
+  
+for (i in seq(n_random)){
+    
+  df_random_CMS2 <- df_C2L_Proportions_annotatedspots_CMS2 %>%
+    dplyr::mutate(rand_proportions = base::sample(Proportions_perSpot)) %>%
+    dplyr::group_by(Pathologist_Annotations, Cell_subtype) %>% 
+    dplyr::mutate(avg_proportion_random = mean(rand_proportions)) %>%
+    dplyr::distinct(Cell_subtype, avg_proportion_random)
+  
+  df_random_real_CMS2 <- df_random_CMS2 %>% 
+    dplyr::inner_join(avg_proportion_annotations_CMS2) %>%
+    dplyr::mutate(difference_real_random = avg_proportion_cell_annotations - avg_proportion_random) %>%
+    dplyr::select(Pathologist_Annotations, Cell_subtype, difference_real_random)
+     
+  df_final_CMS2 <- rbind(df_final_CMS2, df_random_real_CMS2)
+}  
+  
+df_all_CMS2 <-df_final_CMS2 %>% 
+  dplyr::group_by(Pathologist_Annotations, Cell_subtype) %>% 
+  dplyr::mutate(NES = mean(difference_real_random)/sd(difference_real_random)) %>% 
+  dplyr::distinct(Pathologist_Annotations, Cell_subtype, NES)
+
+saveRDS(df_all_CMS2, 
+  paste0(data_directory, analysis_name, input_folder, "df_enrichment_depletion_analysis_CMS2.rds"))
+```
+
+```{r, warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+df_all_CMS2 <- 
+  readRDS(paste0(data_directory, analysis_name, input_folder, "df_enrichment_depletion_analysis_CMS2.rds"))
+
+cells_to_non_visualize <- c("Unknown", "Mature Enterocytes type 1", 
+  "Mature Enterocytes type 2", "Goblet cells", "Stem-like/TA", "Intermediate", 
+  "Smooth muscle cells", "Tip-like ECs", "cDC", "gamma delta T cells", 
+  "Lymphatic ECs", "Pericytes", "Pro-inflammatory", "Proliferating", "Proliferative ECs", 
+  "T helper 17 cells", "NK cells", "Enteric glial cells","Stalk-like ECs" )
+
+final_df_avg_toplot_CMS2<- df_all_CMS2 %>% 
+  dplyr::filter(!(Cell_subtype %in% cells_to_non_visualize)) %>% 
+  dplyr::mutate(Direction = ifelse(NES >= 0, "Enrichment", "Depletion"))
+
+final_df_avg_toplot_CMS2$Pathologist_Annotations <- 
+  factor(final_df_avg_toplot_CMS2$Pathologist_Annotations , 
+         levels = rev(c("lamina propria", "non neo epithelium", 
+                    "epithelium&lamina propria", 
+                    "muscularis_IC med to high", "tumor", 
+                    "tumor&stroma_IC low", 
+                    "tumor&stroma_IC med to high", 
+                    "stroma_fibroblastic_IC low", 
+                    "stroma_fibroblastic_IC med to high", 
+                    "stroma_desmoplastic_IC low", 
+                    "stroma_desmoplastic_IC med to high", 
+                    "IC aggregate_lamina propria", 
+                    "IC aggregate_stroma or muscularis")))
+
+final_df_avg_toplot_CMS2$Cell_subtype <- 
+  factor(final_df_avg_toplot_CMS2$Cell_subtype , 
+         levels = c("CMS1", "CMS2", "CMS3", "CMS4", 
+          "Myofibroblasts", "Stromal 1", "Stromal 2", "Stromal 3", 
+          "SPP1+", 
+          "CD19+CD20+ B", "IgA+ Plasma", "IgG+ Plasma", 
+          "CD4+ T cells", "CD8+ T cells", "Regulatory T cells", 
+          "T follicular helper cells", "Mast cells")) 
+                    
+        
+enrichment_depletion_plot_CMS2 <- 
+  ggplot(final_df_avg_toplot_CMS2, aes(x = Pathologist_Annotations, 
+    y = Cell_subtype, colour = Direction, size = abs(NES))) + 
+    geom_point() + 
+    # scale_size_continuous(range = c(1.5, 9.5), breaks = c(5,35), labels = c("Small","Large")) + 
+    theme_bw() + 
+    theme(axis.title = element_blank(), 
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1),
+          axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+          plot.title =  element_text(face="bold", size=14, hjust = 0.5) , 
+          legend.position ="right", legend.text = element_text(size=10, face="bold", family="Arial"),
+          legend.title =  element_text(size=12, face="bold", family="Arial")) +
+          scale_color_manual(values = c( "#377EB8", "#E41A1C")) + 
+          coord_flip() +  
+          guides(col = guide_legend(title = "Effect", order = 1, override.aes = list(size = 5)),  
+          size =guide_legend(title = "Enrichment Score", order =2)) 
+
+enrichment_depletion_plot_CMS2
+```
+
+## Plot considering only mixed phenotype samples 
+
+
+```{r, warning=FALSE, message=FALSE}
+samples_to_consider_CMS2_CMS1 <- c("SN048_A416371_Rep1", "SN048_A416371_Rep2", 
+  "SN123_A551763_Rep1")
+
+spots_annotations_CMS2_CMS1 <- seurat_objects_patho_merge@meta.data %>% 
+  dplyr::select(orig.ident, Pathologist_Annotations) %>% 
+  tibble::rownames_to_column(var = "spot_id") %>%
+  dplyr::mutate(spot_id = str_remove(spot_id, "_[0-9]+")) %>% 
+  dplyr::mutate(orig.ident = str_replace(orig.ident, "SN123_A938797_Rep1_X", "SN123_A938797_Rep1")) %>% 
+  dplyr::filter(!is.na(Pathologist_Annotations)) %>% 
+  dplyr::filter(Pathologist_Annotations !=  "exclude") %>% 
+  dplyr::filter(orig.ident %in% samples_to_consider_CMS2_CMS1)
+
+df_C2L_Proportions_annotatedspots_CMS2_CMS1 <- results_C2L_Korean %>%
+  dplyr::inner_join(spots_annotations_CMS2_CMS1, by = c("spot_id" = "spot_id", "sample" = "orig.ident")) %>% 
+  dplyr::select(spot_id, sample, cell_density_q05, Cell_subtype, Pathologist_Annotations) %>%
+  dplyr::mutate(spot_sample_id = paste0(sample, "_", spot_id)) %>% 
+  dplyr::group_by(spot_sample_id) %>% 
+  dplyr::mutate(Proportions_perSpot = cell_density_q05/sum(cell_density_q05)) %>%
+  dplyr::ungroup()
+
+avg_proportion_annotations_CMS2_CMS1 <- results_C2L_Korean %>%
+  dplyr::inner_join(spots_annotations_CMS2_CMS1, by = c("spot_id" = "spot_id", "sample" = "orig.ident")) %>% 
+  dplyr::select(spot_id, sample, cell_density_q05, Cell_subtype, Pathologist_Annotations) %>%
+  dplyr::mutate(spot_sample_id = paste0(sample, "_", spot_id)) %>% 
+  dplyr::group_by(spot_sample_id) %>% 
+  dplyr::mutate(Proportions_perSpot = cell_density_q05/sum(cell_density_q05)) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(Pathologist_Annotations, Cell_subtype) %>% 
+  dplyr::mutate(avg_proportion_cell_annotations = mean(Proportions_perSpot)) %>%
+  dplyr::distinct(Cell_subtype, avg_proportion_cell_annotations)
+```
+
+```{r, warning=FALSE, message=FALSE, eval=FALSE}
+n_random <- 10000
+df_final_CMS2_CMS1 <- data.frame()
+  
+for (i in seq(n_random)){
+    
+  df_random_CMS2_CMS1 <- df_C2L_Proportions_annotatedspots_CMS2_CMS1 %>%
+    dplyr::mutate(rand_proportions = base::sample(Proportions_perSpot)) %>%
+    dplyr::group_by(Pathologist_Annotations, Cell_subtype) %>% 
+    dplyr::mutate(avg_proportion_random = mean(rand_proportions)) %>%
+    dplyr::distinct(Cell_subtype, avg_proportion_random)
+  
+  df_random_real_CMS2_CMS1 <- df_random_CMS2_CMS1 %>% 
+    dplyr::inner_join(avg_proportion_annotations_CMS2_CMS1) %>%
+    dplyr::mutate(difference_real_random = avg_proportion_cell_annotations - avg_proportion_random) %>%
+    dplyr::select(Pathologist_Annotations, Cell_subtype, difference_real_random)
+     
+  df_final_CMS2_CMS1 <- rbind(df_final_CMS2_CMS1, df_random_real_CMS2_CMS1)
+}  
+  
+df_all_CMS2_CMS1 <-df_final_CMS2_CMS1 %>% 
+  dplyr::group_by(Pathologist_Annotations, Cell_subtype) %>% 
+  dplyr::mutate(NES = mean(difference_real_random)/sd(difference_real_random)) %>% 
+  dplyr::distinct(Pathologist_Annotations, Cell_subtype, NES)
+
+saveRDS(df_all_CMS2_CMS1, 
+  paste0(data_directory, analysis_name, input_folder, "df_enrichment_depletion_analysis_CMS2_CMS1.rds"))
+```
+
+```{r, warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+df_all_CMS2_CMS1 <- 
+  readRDS(paste0(data_directory, analysis_name, input_folder, "df_enrichment_depletion_analysis_CMS2_CMS1.rds"))
+
+cells_to_non_visualize <- c("Unknown", "Mature Enterocytes type 1", 
+  "Mature Enterocytes type 2", "Goblet cells", "Stem-like/TA", "Intermediate", 
+  "Smooth muscle cells", "Tip-like ECs", "cDC", "gamma delta T cells", 
+  "Lymphatic ECs", "Pericytes", "Pro-inflammatory", "Proliferating", "Proliferative ECs", 
+  "T helper 17 cells", "NK cells", "Enteric glial cells","Stalk-like ECs")
+
+final_df_avg_toplot_CMS2_CMS1<- df_all_CMS2_CMS1 %>% 
+  dplyr::filter(!(Cell_subtype %in% cells_to_non_visualize)) %>% 
+  dplyr::mutate(Direction = ifelse(NES >= 0, "Enrichment", "Depletion"))
+
+final_df_avg_toplot_CMS2_CMS1$Pathologist_Annotations <- 
+  factor(final_df_avg_toplot_CMS2_CMS1$Pathologist_Annotations , 
+         levels = rev(c("tumor", "tumor&stroma", 
+                    "tumor&stroma_IC med to high", 
+                    "stroma_fibroblastic_IC med to high")))
+
+final_df_avg_toplot_CMS2_CMS1$Cell_subtype <- 
+  factor(final_df_avg_toplot_CMS2_CMS1$Cell_subtype , 
+         levels = c("CMS1", "CMS2", "CMS3", "CMS4", 
+          "Myofibroblasts", "Stromal 1", "Stromal 2", "Stromal 3", 
+          "SPP1+", 
+          "CD19+CD20+ B", "IgA+ Plasma", "IgG+ Plasma", 
+          "CD4+ T cells", "CD8+ T cells", "Regulatory T cells", 
+          "T follicular helper cells", "Mast cells")) 
+
+enrichment_depletion_plot_CMS2_CMS1 <- 
+  ggplot(final_df_avg_toplot_CMS2_CMS1, aes(x = Pathologist_Annotations, 
+    y = Cell_subtype, colour = Direction, size = abs(NES))) + 
+    geom_point() + 
+    # scale_size_continuous(range = c(1.5, 9.5), breaks = c(5,35), labels = c("Small","Large")) + 
+    theme_bw() + 
+    theme(axis.title = element_blank(), 
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1),
+          axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+          plot.title =  element_text(face="bold", size=14, hjust = 0.5) , 
+          legend.position ="right", legend.text = element_text(size=10, face="bold", family="Arial"),
+          legend.title =  element_text(size=12, face="bold", family="Arial")) +
+          scale_color_manual(values = c( "#377EB8", "#E41A1C")) + 
+          coord_flip() +  
+          guides(col = guide_legend(title = "Effect", order = 1, override.aes = list(size = 5)),  
+          size =guide_legend(title = "Enrichment Score", order =2)) 
+
+enrichment_depletion_plot_CMS2_CMS1
+```
+
+```{r, warning=FALSE, message=FALSE, fig.width=12, fig.height=10}
+p1 <- enrichment_depletion_plot_CMS2 + theme(legend.position = 'bottom',  
+  axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+  legend.title =  element_text(size=16, face="bold", family="Arial"), 
+  legend.text = element_text(size=14, face="bold", family="Arial")) + 
+  ggtitle("Patients with CMS2 phenotype")
+p2 <- enrichment_depletion_plot_CMS2_CMS1 + theme(legend.position='bottom', 
+  legend.title =  element_text(size=16, face="bold", family="Arial"), 
+  legend.text = element_text(size=14, face="bold", family="Arial")) + 
+  ggtitle("Patients with CMS1-CMS2 mixed phenotype" )
+
+
+ggarrange(p1, p2, nrow=2, common.legend = TRUE, legend="bottom", align = 'v') 
+ggsave(filename = "home/valdeola/Desktop/Figure2_EnrichmentDepletionPlot_V2.tiff", device='tiff', dpi=300)
+```
+
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

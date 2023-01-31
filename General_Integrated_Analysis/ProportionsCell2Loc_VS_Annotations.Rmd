@@ -1,0 +1,315 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Deconvolution Results VS Annotations"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(dplyr)
+library(readr)
+library(stringr)
+library(purrr)
+library(cowplot)
+library(ggpubr)
+library(kableExtra)
+
+
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_folder <- "IntermediaryFiles/"
+input_names_1 <- "SeuratList_Clusters_Res05.rds"
+input_names_2 <- "Patho_Annotations/"
+
+files_to_read_1 <- paste0(data_directory, analysis_name,input_folder,input_names_1)
+files_to_read_2 <- paste0(data_directory, analysis_name,input_folder,input_names_2)
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+
+## We consider all the samples but the one with low QC results
+samples_to_consider <- c("SN048_A121573_Rep1","SN048_A121573_Rep2",
+  "SN048_A416371_Rep1", "SN048_A416371_Rep2", "SN123_A551763_Rep1",
+  "SN123_A595688_Rep1", "SN123_A798015_Rep1", "SN123_A938797_Rep1_X",
+  "SN124_A595688_Rep2", "SN124_A798015_Rep2",
+  "SN124_A938797_Rep2", "SN84_A120838_Rep1", "SN84_A120838_Rep2" )
+```
+
+We include pathologist annotations into Seurat objects
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read_1)
+seurat_objects <- seurat_objects[samples_to_consider]
+
+seurat_objects_patho <- 
+  lapply(seurat_objects, function(x){
+    current_sample <- unique(x@meta.data$orig.ident)
+    
+    patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".csv"))
+    
+    colnames(patho_anno_current_sample) <- c("Barcode", "Pathologist_Annotations")
+    
+    x@meta.data <- x@meta.data %>%
+      tibble::rownames_to_column("spot_id") %>%
+      dplyr::left_join(patho_anno_current_sample, by = c("spot_id" = "Barcode")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "tumor&stroma IC med to high", "tumor&stroma_IC med to high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "epitehlium&submucosa", "epithelium&submucosa")) %>% 
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggregate submucosa", "IC aggregate_submucosa")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggregregate_submucosa", "IC aggregate_submucosa")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggreates_stroma or muscularis", "IC aggregate_stroma or muscularis")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggragate_stroma or muscularis", "IC aggregate_stroma or muscularis")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggreates_stroma or muscularis", "IC aggregate_stroma or muscularis")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggregate_muscularis or stroma", "IC aggregate_stroma or muscularis")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma desmoplastic_IC low", "stroma_desmoplastic_IC low")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma desmoplastic_IC med to high", "stroma_desmoplastic_IC med to high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma_fibroblastic_IC high", "stroma_fibroblastic_IC_high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma_fibroblastic_IC med", "stroma_fibroblastic_IC_med")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma_fibroblastic_IC_med", "stroma_fibroblastic_IC med to high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma_fibroblastic_IC_high", "stroma_fibroblastic_IC med to high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "submucosa", "lamina propria")) %>% 
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "epithelium&submucosa", "epithelium&lam propria")) %>% 
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggregate_submucosa", "IC aggregate_lam propria")) %>% 
+      tibble::column_to_rownames("spot_id") 
+      
+    
+    saveRDS(object = x@meta.data %>%
+      tibble::rownames_to_column("spot_id"), 
+            file =  paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".rds"))
+              
+    Idents(x) <- 'Pathologist_Annotations'
+    
+    return(x)
+})
+```
+
+We visualize the global number of spots with the different annotations
+
+```{r, warning=FALSE, message=FALSE}
+all_annotations <- 
+  unlist(lapply(seurat_objects_patho, function(x){x@meta.data$Pathologist_Annotations}))
+table(all_annotations)
+
+list_all_annotations <- 
+  lapply(seurat_objects_patho, function(x){unique(x@meta.data$Pathologist_Annotations)})
+  
+table(unlist(list_all_annotations))
+
+selected_annotations <- names(which(table(unlist(list_all_annotations)) > 2))
+selected_annotations <- selected_annotations[selected_annotations != "exclude"]
+
+seurat_objects_patho_merge <- 
+  merge(x= seurat_objects_patho[[1]],y=seurat_objects_patho[-1])
+```
+
+
+Then, we read cell2location results, to explore the cell type content/abundance 
+of this tumor annotated spots
+
+```{r, warning=FALSE, message=FALSE}
+filename_results_C2L_Korean <- paste0(data_directory, analysis_name, "Cell2Location/results/LocationModelLinearDependentWMultiExperiment_14experiments_36clusters_20654locations_4188genes/W_cell_density_q05.csv")
+  
+results_C2L_Korean <- read_csv(filename_results_C2L_Korean) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern = "Count_")) 
+  
+colnames(results_C2L_Korean) <-
+  str_replace(colnames(results_C2L_Korean), 
+              pattern = "q05_spot_factors", replacement = "")
+
+results_C2L_Korean <- results_C2L_Korean %>% 
+  dplyr::mutate(sample = str_extract(.$spot_id, pattern =".*Rep[1-2]")) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern =".*Rep[1-2]_")) %>%
+  dplyr::mutate(spot_id = str_remove(spot_id, pattern = "^X_")) %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") 
+
+
+### To obtain the proportions at the major cell type level, we read the metadata
+## from the lee Paper and assing the different cell subtypes to its broader category.
+
+## We define the different cell types:
+
+metadata_Lee_paper <- 
+  read_tsv(file = "../Cell2Location/inputs/scRNAseq-ref/raw/metadata.tsv")
+
+
+## Global results
+
+epithelial_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="Epithelial cells")
+
+
+tumor_epithelial_cells <- epithelial_cells %>%
+  dplyr::filter(Cell_subtype %in% c("CMS1","CMS2","CMS3","CMS4")) %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct() 
+tumor_epithelial_cells$Cell_type <- "Tumor Cells"
+
+normal_epithelial_cells <- epithelial_cells %>%
+  dplyr::filter(!(Cell_subtype %in% c("CMS1","CMS2","CMS3","CMS4")))  %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% dplyr::distinct() 
+
+stromal_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="Stromal cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% dplyr::distinct()
+
+myeloid_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="Myeloids") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+T_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="T cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+B_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="B cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+Mast_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="Mast cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% distinct()
+
+MainCellTypes_labels <- rbind(tumor_epithelial_cells, 
+                              normal_epithelial_cells, 
+                              stromal_cells, 
+                              myeloid_cells,
+                              T_cells, B_cells, Mast_cells) %>% 
+  dplyr::filter(Cell_subtype != "Unknown")
+
+results_C2L_Korean_MajorCells <- results_C2L_Korean %>% 
+  dplyr::inner_join(MainCellTypes_labels,  by = "Cell_subtype")
+```
+
+
+
+```{r, warning=FALSE, message=FALSE}
+spots_annotations <- seurat_objects_patho_merge@meta.data %>% 
+  dplyr::select(orig.ident, Pathologist_Annotations) %>% 
+  tibble::rownames_to_column(var = "spot_id") %>%
+  dplyr::mutate(spot_id = str_remove(spot_id, "_[0-9]+")) %>% 
+  dplyr::mutate(orig.ident = str_replace(orig.ident, "SN123_A938797_Rep1_X", "SN123_A938797_Rep1")) %>% 
+  dplyr::filter(!is.na(Pathologist_Annotations)) %>% 
+  dplyr::filter(Pathologist_Annotations %in%  selected_annotations)
+
+
+df_C2L_Proportions_annotatedspots <- results_C2L_Korean_MajorCells %>% 
+  dplyr::inner_join(spots_annotations, by = c("spot_id" = "spot_id", "sample" = "orig.ident")) %>% 
+  dplyr::select(spot_id, sample, cell_density_q05, Cell_type, Pathologist_Annotations) %>%
+  dplyr::mutate(spot_sample_id = paste0(sample, "_", spot_id)) %>% 
+  dplyr::group_by(Cell_type, Pathologist_Annotations) %>% 
+  summarise(Total = sum(cell_density_q05))
+  
+  
+   # dplyr::mutate(Proportions_perSpot = cell_density_q05/sum(cell_density_q05)) %>%
+   # dplyr::ungroup()
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+
+df_C2L_Proportions_annotatedspots$Pathologist_Annotations <- 
+  factor(df_C2L_Proportions_annotatedspots$Pathologist_Annotations , 
+         levels = rev(c("non neo epithelium", 
+         "lamina propria", 
+         "epithelium&lamina propria", 
+         "muscularis_IC med to high",
+         "tumor",
+         "tumor&stroma_IC med to high",
+         "stroma_fibroblastic_IC med to high",
+         "IC aggregate_lamina propria", 
+         "IC aggregate_stroma or muscularis")))
+
+
+p1 <- ggplot(df_C2L_Proportions_annotatedspots,aes(x = Pathologist_Annotations , y= Total, fill = Cell_type)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+  theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_text(size=14, face = "bold", family="Arial"), 
+    axis.text = element_text(size=12, face = "bold", family="Arial"), 
+    plot.title =  element_text(face="bold", size=18, hjust = 0.5)) + 
+  labs(y="Major Cell \n\ Type Proportions", x ="Sample") + 
+  theme(legend.position ="bottom", legend.title = element_blank(), 
+        axis.title.y = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial")) + 
+  scale_y_continuous(position = "right")
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+df_C2L_Proportions_annotatedspots_proportions <- 
+  df_C2L_Proportions_annotatedspots %>% 
+    dplyr::group_by(Pathologist_Annotations) %>% 
+    dplyr::mutate(Proportions = Total / sum(Total)) %>% 
+    dplyr::ungroup()
+
+df_C2L_Proportions_annotatedspots_proportions %>% 
+  dplyr::select(Pathologist_Annotations, Cell_type, Proportions) %>% 
+  dplyr::arrange(desc(Pathologist_Annotations), desc(Proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+```{r, warning=FALSE, message=FALSE, fig.height=6, fig.width=8, dpi=300}
+p1
+```
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

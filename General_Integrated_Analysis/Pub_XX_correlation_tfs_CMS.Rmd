@@ -1,0 +1,258 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X:Correlation Analysis of TF Activities and Cell Type abundances for CMS"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/pstore/data/biomics/_pre_portfolio/_platform_evaluation/SpatialTranscriptomics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes the the Spatial Omics data generated with 10X 
+technology on a set of CRC samples. In particular, it explores the correlation 
+between TF activities and cell type proportion per spot.  
+
+
+```{r, warning=FALSE, message=FALSE}
+library(CCA, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(patchwork, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+## We need to load a previous version of spatstat to make Seurat run. Related
+## to the following issue https://github.com/satijalab/seurat/issues/4226
+library(spatstat, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+## We need to a load a previous version of Matrix related to the following issue: 
+## https://github.com/satijalab/seurat/issues/4436
+library(dplyr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(Seurat, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(readr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(stringr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(tibble, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+# library(tidyr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(ggplot2, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(ggrepel, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(RColorBrewer, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(pheatmap, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+source(file = "WrapperFunction/SeuratWrappers.R")
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "IntermediaryFiles/"
+input_names <- "SeuratList_Clusters_Res05_Dorothea.rds"
+
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+results_directory <- paste0(data_directory, analysis_name, input_files)
+# setwd(paste0(data_directory, analysis_name))
+```
+
+We read the Seurat objects containing the TF activity. 
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read)
+```
+
+We read the results of the deconvolution process containing cell type abundances
+per spot. 
+
+```{r, warning=FALSE, message=FALSE}
+filename <- 
+  "Cell2Location/results/LocationModelLinearDependentWMultiExperiment_14experiments_36clusters_20654locations_4188genes/W_mRNA_count_q05.csv"
+
+results_C2L <- read_csv(filename) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern = "Count_")) %>%
+  dplyr::mutate(spot_id = str_replace(.$spot_id, pattern = "SN123_A938797_Rep1_" ,
+  replacement = "SN123_A938797_Rep1_X_")) 
+
+sum_UMI_spot <- rowSums(results_C2L[,-1])
+results_C2L[,-1] <- results_C2L[,-1]/sum_UMI_spot
+
+colnames(results_C2L) <- str_replace(colnames(results_C2L), 
+    pattern = "q05_nUMI_factors", replacement = "")
+
+## We are only going to consider the CMS signatures
+
+results_C2L <- 
+  results_C2L[,colnames(results_C2L) %in% c("spot_id","CMS1", "CMS2","CMS3", "CMS4")]
+
+### We remove samples SN84_A121573_Rep1 and SN84_A121573_Rep2 since we did a 
+### new cut of the same sample. We also remove the low quality sample.
+seurat_objects <- 
+  seurat_objects[names(seurat_objects) %in% 
+                   c("SN124_A551763_Rep2") == FALSE]
+```
+
+
+
+# Results taking into account correlation between the spots of all the samples together
+
+We display the different correlation plots when this is globally computed per 
+all the samples. 
+
+```{r, results = 'asis', message=FALSE, dpi=300, warning=FALSE, fig.height=14, fig.width=14}
+## We merge the datasets and do so formatting. 
+# VariableTFs <- head(names(sort(table(all_TFs_higher), decreasing = TRUE)),40)
+
+# merge_TFs <- merge_assay(seurat_objects, VariableTFs)
+merge_TFs <- merge_assay(seurat_objects)
+
+## We select only the most variable ones
+merge_CL2_TFs <- merge_TFs %>%
+  dplyr::inner_join(results_C2L, by ="spot_id") %>% 
+  dplyr::arrange(spot_id) 
+  
+
+## We separate the merged dataset in our two matrices on which we will compute 
+## the canonical correlation.
+  
+X <- merge_CL2_TFs[,2:ncol(merge_TFs)]
+Y <- merge_CL2_TFs[,(ncol(merge_TFs) +1):ncol(merge_CL2_TFs)]
+
+correl <- matcor(X, Y)
+canonical_correlation2 <- cc(X, Y)
+  
+cat( "\n\n")
+
+cat( "## Cross TFs-Cell type abundances Correlation: ", "\n\n")
+  
+CrossCorrelation <- 
+  correl$XYcor[1:(ncol(merge_TFs)-1),ncol(merge_TFs):(ncol(merge_CL2_TFs)-1)]
+
+
+Higher_TFcorrelations <-   CrossCorrelation %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var ="TF") %>%
+  tidyr::pivot_longer(!TF, values_drop_na = TRUE) %>% 
+  dplyr::group_by(name) %>%
+  # dplyr::mutate(value = round(value,2)) %>% 
+  dplyr::slice_max(order_by = abs(value), n =10) %>% 
+  dplyr::pull(TF) %>% unique()
+
+CrossCorrelation_higherTFs <- 
+  CrossCorrelation[rownames(CrossCorrelation) %in% Higher_TFcorrelations,]
+
+MatrixCorrXY <-   CrossCorrelation_higherTFs %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var ="TF") %>%
+  tidyr::pivot_longer(!TF, values_drop_na = TRUE) %>% 
+  dplyr::mutate(value = round(value,2))
+
+
+p_CrossCorrelation <- ggplot(data = MatrixCorrXY, 
+                              aes(TF  ,name  , fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal()+  theme(legend.position="top")  +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 12, hjust = 1),
+        axis.text.y = element_text(size = 12))+
+  xlab("TFs") + ylab("Cell Types") + 
+  coord_fixed() 
+
+
+print(p_CrossCorrelation)
+  
+mypalette <- rev(brewer.pal(n = 9, name ="RdBu"))
+  
+par(mar=c(10,10,10,10))
+    
+pheatmap(t(CrossCorrelation[Higher_TFcorrelations,]),
+         treeheight_row=0,treeheight_col=0, 
+  color =colorRampPalette(mypalette)(100),cluster_rows = FALSE,
+  fontsize = 12, cluster_cols = TRUE, breaks=seq(-1,1,length.out = 
+  length(colorRampPalette(mypalette)(100)) + 1))
+
+
+Main_tfs <- MatrixCorrXY %>% pull(TF)
+
+cat( "\n\n")
+  
+cat( "##  TF activities Correlation: ", "\n\n")
+  
+MatrixCorrX <-   correl$Xcor %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var ="TF") %>%
+  tidyr::pivot_longer(!TF, values_drop_na = TRUE) %>% 
+  dplyr::filter(TF %in% Main_tfs & name %in% Main_tfs)
+  # dplyr::mutate(value = round(value,2))
+  
+p_cor_TFs <- ggplot(data = MatrixCorrX, aes(TF, name , fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                 size = 10, hjust = 1),
+        axis.text.y = element_text(size = 10))+
+  xlab("TFs") + ylab("TFs") + 
+  coord_fixed()
+
+print(p_cor_TFs)
+  
+pheatmap(correl$Xcor, treeheight_row=0,treeheight_col=0, 
+  color =colorRampPalette(mypalette)(100),cluster_rows = FALSE,
+  fontsize = 12, cluster_cols = FALSE, breaks=seq(-1,1,length.out = 
+  length(colorRampPalette(mypalette)(100)) + 1))
+
+
+cat( "\n\n")
+  
+cat( "## Variables representation on the canonical variates: ", "\n\n")
+
+idx <- which(colnames(X) %in% Higher_TFcorrelations)
+X <- X[,idx]
+canonical_correlation2 <- cc(X, Y)
+  
+  
+d1 = 2 
+d2 = 1
+df2 = data.frame(comp1 = c(canonical_correlation2$scores$corr.X.xscores[, d1],
+                           canonical_correlation2$scores$corr.Y.xscores[, d1]),
+                comp2 = c(canonical_correlation2$scores$corr.X.xscores[, d2],
+                           canonical_correlation2$scores$corr.Y.xscores[, d2]),
+                color = c(rep("TFs", ncol(X)), 
+                          (rep("Cell Types", ncol(Y)))))
+  
+p_Canonival_variates <-ggplot(df2, aes(comp1, comp2), colour = color) +
+  geom_label_repel(aes(colour = color, label= rownames(df2)),
+          vjust=0,size = 5, family = "sans", direction= "both",
+          max.overlaps=12) +
+  theme_bw() + 
+  theme(legend.position="none") +
+  theme(legend.title=element_blank())
+  
+print(p_Canonival_variates)
+  
+cat( "\n\n") 
+```
+
+
+# Conclusion 
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

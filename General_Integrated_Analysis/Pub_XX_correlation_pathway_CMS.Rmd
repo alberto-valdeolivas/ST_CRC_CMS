@@ -1,0 +1,239 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X:Correlation Analysis of Pathway Activities and Cell Type abundances for CMS"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/pstore/data/biomics/_pre_portfolio/_platform_evaluation/SpatialTranscriptomics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes the the Spatial Omics data generated with 10X 
+technology on a set of CRC samples. In particular, it explores the correlation 
+between pathway activities and CMS cell type proportion per spot.  
+
+
+```{r, warning=FALSE, message=FALSE}
+# library(dplyr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(CCA)
+library(ggplot2)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(readr)
+library(stringr)
+library(tibble)
+library(ggrepel)
+library(RColorBrewer)
+library(pheatmap)
+source(file = "WrapperFunction/SeuratWrappers.R")
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "IntermediaryFiles/"
+input_names <- "SeuratList_Clusters_Res05_Progeny.rds"
+
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+results_directory <- paste0(data_directory, analysis_name, input_files)
+# setwd(paste0(data_directory, analysis_name))
+```
+
+We read the Seurat objects containing the pathway activity. 
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read)
+```
+
+We read the results of the deconvolution process containing cell type abundances
+per spot. 
+
+```{r, warning=FALSE, message=FALSE}
+filename <- 
+  paste0(data_directory,analysis_name,  "Cell2Location/results/LocationModelLinearDependentWMultiExperiment_14experiments_36clusters_20654locations_4188genes/W_mRNA_count_q05.csv")
+
+results_C2L <- read_csv(filename) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern = "Count_")) %>%
+  dplyr::mutate(spot_id = str_replace(.$spot_id, pattern = "SN123_A938797_Rep1_" ,
+  replacement = "SN123_A938797_Rep1_X_")) 
+
+
+sum_UMI_spot <- rowSums(results_C2L[,-1])
+results_C2L[,-1] <- results_C2L[,-1]/sum_UMI_spot
+
+colnames(results_C2L) <- str_replace(colnames(results_C2L), 
+    pattern = "q05_nUMI_factors", replacement = "")
+
+## We are only going to consider the CMS signatures
+
+results_C2L <- 
+  results_C2L[,colnames(results_C2L) %in% 
+                c("spot_id","CMS1", "CMS2", "CMS3", "CMS4")]
+
+### We remove the low quality sample. 
+
+seurat_objects <- 
+  seurat_objects[names(seurat_objects) %in% 
+                   c("SN124_A551763_Rep2") == FALSE]
+
+```
+
+
+# Results taking into account correlation between the spots of all the samples together
+
+We display the different correlation plots when this is globally computed per 
+all the samples. 
+
+```{r, results = 'asis', message=FALSE, dpi=300, warning=FALSE}
+## We merge the datasets and do so formatting. 
+merge_CL2_pathways <- merge_assay(seurat_objects) %>%
+  dplyr::inner_join(results_C2L, by ="spot_id") %>% 
+  dplyr::arrange(spot_id) 
+
+
+## We separate the merged dataset in our two matrices on which we will compute 
+## the canonical correlation.
+  
+X <- merge_CL2_pathways[,2:15]
+Y <- merge_CL2_pathways[,16:19]
+
+correl <- matcor(X, Y)
+canonical_correlation2 <- cc(X, Y)
+  
+cat( "\n\n")
+  
+cat( "## Pathway activities Correlation: ", "\n\n")
+  
+MatrixCorrX <-   correl$Xcor %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var ="pathway") %>%
+  tidyr::pivot_longer(!pathway, values_drop_na = TRUE) # %>% 
+  # dplyr::mutate(value = round(value,2))
+
+
+p_cor_pathways <- ggplot(data = MatrixCorrX, aes(pathway  , name     , fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 9, hjust = 1))+
+  xlab("Pathways") + ylab("Pathways") + 
+  coord_fixed()
+
+print(p_cor_pathways)
+  
+cat( "\n\n")
+  
+cat( "## Cell type abundances Correlation: ", "\n\n")
+  
+MatrixCorrY <-   correl$Ycor %>% 
+    as.data.frame() %>% 
+    tibble::rownames_to_column(var ="CellType") %>%
+    tidyr::pivot_longer(!CellType, values_drop_na = TRUE) 
+  
+
+p_cor_celltype <- ggplot(MatrixCorrY, aes(name , CellType , fill = value))+
+    geom_tile(color = "white")+
+    scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+    theme_minimal()+ 
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 10, hjust = 1))+
+    xlab("Cell Type") + ylab("Cell Type") +
+    coord_fixed()
+
+print(p_cor_celltype)
+  
+cat( "\n\n")
+  
+cat( "## Cross Pathway-Cell type abundances Correlation: ", "\n\n")
+  
+CrossCorrelation <- correl$XYcor[1:14,15:18]
+
+
+MatrixCorrXY <-   CrossCorrelation %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var ="var1") %>%
+  tidyr::pivot_longer(!var1, values_drop_na = TRUE) %>% 
+  dplyr::mutate(value = round(value,2))
+
+
+p_CrossCorrelation <- ggplot(data = MatrixCorrXY, aes(var1,name  , fill = value))+
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+    theme_minimal()+ 
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 10, hjust = 1))+
+    xlab("Pathways") + ylab("Cell Type") + 
+    coord_fixed()
+
+print(p_CrossCorrelation)
+
+mypalette <- rev(brewer.pal(n = 9, name ="RdBu"))
+  
+par(mar=c(10,10,10,10))
+    
+pheatmap(t(CrossCorrelation), treeheight_row=0,treeheight_col=0, 
+  color =colorRampPalette(mypalette)(100),cluster_rows = FALSE,
+  fontsize = 16, cluster_cols = TRUE, breaks=seq(-1,1,length.out = 
+  length(colorRampPalette(mypalette)(100)) + 1))
+  
+cat( "\n\n")
+  
+cat( "## Variables representation on the canonical variates: ", "\n\n")
+  
+  
+d1 = 2 
+d2 = 1
+df2 = data.frame(comp1 = c(canonical_correlation2$scores$corr.X.xscores[, d1],
+                           canonical_correlation2$scores$corr.Y.xscores[, d1]),
+                 comp2 = c(canonical_correlation2$scores$corr.X.xscores[, d2],
+                           canonical_correlation2$scores$corr.Y.xscores[, d2]),
+                color = c(rep("Pathways", ncol(X)), 
+                        (rep("Cell Types", ncol(Y)))))
+  
+p_Canonival_variates <-ggplot(df2, aes(comp1, comp2), colour = color) +
+  geom_label_repel(aes(colour = color, label= rownames(df2)),
+          vjust=0,size = 3, family = "sans", direction= "both") +
+  theme_bw() + 
+  theme(legend.position="none") +
+  theme(legend.title=element_blank())
+  
+print(p_Canonival_variates)
+  
+cat( "\n\n") 
+```
+
+
+# Conclusion 
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

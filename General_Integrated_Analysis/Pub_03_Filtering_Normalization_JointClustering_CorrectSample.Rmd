@@ -1,0 +1,388 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Normalization and Clustering"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/pstore/data/biomics/_pre_portfolio/_platform_evaluation/SpatialTranscriptomics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes the the Spatial Omics data generated with 10X 
+technology on a set of CRC samples and performs normalization and 
+joint clustering. 
+
+```{r, warning=FALSE,message=FALSE}
+library(harmony, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+# library(dplyr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(patchwork, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+library(Seurat, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(readr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(stringr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(ggplot2, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(ggpubr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(msigdbr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(RColorBrewer, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+# library(EnhancedVolcano)
+source(file = "WrapperFunction/SeuratWrappers.R")
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "IntermediaryFiles/"
+input_names <- "SeuratList_Clusters_Res05.rds"
+
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+```
+
+We read the 10x VISIUM data.
+
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read)
+
+merge_seurat_object <- 
+  merge(x = seurat_objects[[1]], y= seurat_objects[-1])
+
+merge_seurat_object_2 <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_object, slot = "counts"), 
+    min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE)
+
+  
+merge_seurat_object_2@meta.data$orig.ident <- 
+  merge_seurat_object@meta.data$orig.ident  
+rm(seurat_objects)
+rm(merge_seurat_object)
+
+merge_seurat_object_2@meta.data$slide <- 
+  merge_seurat_object_2@meta.data$orig.ident %>%
+  str_extract("[^_]+")
+
+merge_seurat_object_2@meta.data$patient <- 
+  str_match(merge_seurat_object_2@meta.data$orig.ident, "_\\s*(.*?)\\s*_")[,2]
+
+merge_seurat_object_2@meta.data$replicate <- 
+  merge_seurat_object_2@meta.data$orig.ident %>%
+  str_remove("[^A]+") %>% 
+  str_replace("A938797_Rep1_X", "A938797_Rep1")
+
+merge_seurat_object_2@meta.data$rep <- 
+  merge_seurat_object_2@meta.data$replicate %>%
+  str_remove("[^R]+")  
+
+merge_seurat_object_2@meta.data$patient_ID <- 
+  dplyr::inner_join(merge_seurat_object_2@meta.data,df_patient_ID_transform) %>% 
+  dplyr::pull(patient_ID)
+
+merge_seurat_object_2@meta.data <- merge_seurat_object_2@meta.data  %>% 
+  dplyr::mutate(patient_ID_rep = paste0(.$patient_ID,str_remove(replicate,"[^_Rep]+")))
+```
+
+# Results
+
+## Before Batch correction
+
+### PCs before batch correction
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+# palette <- RColorBrewer::brewer.pal(n=14, "Paired")
+DimPlot(object = merge_seurat_object_2,  reduction = "pca", 
+  pt.size = .25, group.by = "orig.ident")
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+VlnPlot(object = merge_seurat_object_2, features = "PC_1", 
+              group.by = "orig.ident", pt.size = .1)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+# palette <- RColorBrewer::brewer.pal(n=14, "Paired")
+DimPlot(object = merge_seurat_object_2,  reduction = "pca", 
+  pt.size = .25, group.by = "slide")
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+VlnPlot(object = merge_seurat_object_2, features = "PC_1", 
+              group.by = "patient_ID", pt.size = .1)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+# palette <- RColorBrewer::brewer.pal(n=14, "Paired")
+DimPlot(object = merge_seurat_object_2,  reduction = "pca", 
+  pt.size = .25, group.by = "patient_ID")
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+VlnPlot(object = merge_seurat_object_2, features = "PC_1", 
+              group.by = "slide", pt.size = .1)
+```
+
+
+### UMAPs before batch correction
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+merge_seurat_object_2 <- merge_seurat_object_2 %>%  RunUMAP(dims = 1:30)
+DimPlot(merge_seurat_object_2, reduction = "umap", group.by = "orig.ident", 
+        pt.size = .1) 
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+DimPlot(merge_seurat_object_2, reduction = "umap", group.by = "slide", 
+        pt.size = .1) 
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+DimPlot(merge_seurat_object_2, reduction = "umap", group.by = "patient_ID", 
+        pt.size = .1) 
+```
+
+## Batch correction with Harmony
+
+We correct batch effects per capture area
+
+```{r,warning=FALSE, message=FALSE}
+merge_seurat_object_2 <- merge_seurat_object_2 %>% 
+    RunHarmony(c("orig.ident"), plot_convergence = TRUE, assay.use = "SCT",
+               max.iter.harmony = 20)
+```
+
+
+### PCs after batch correction
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+# palette <- RColorBrewer::brewer.pal(n=14, "Paired")
+DimPlot(object = merge_seurat_object_2,  reduction = "harmony", 
+  pt.size = .25, group.by = "orig.ident")
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+VlnPlot(object = merge_seurat_object_2, features = "harmony_1", 
+              group.by = "orig.ident", pt.size = .1)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+# palette <- RColorBrewer::brewer.pal(n=14, "Paired")
+DimPlot(object = merge_seurat_object_2,  reduction = "harmony", 
+  pt.size = .25, group.by = "slide")
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+VlnPlot(object = merge_seurat_object_2, features = "harmony_1", 
+              group.by = "patient_ID", pt.size = .1)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+# palette <- RColorBrewer::brewer.pal(n=14, "Paired")
+DimPlot(object = merge_seurat_object_2,  reduction = "harmony", 
+  pt.size = .25, group.by = "patient_ID")
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+VlnPlot(object = merge_seurat_object_2, features = "harmony_1", 
+              group.by = "slide", pt.size = .1)
+```
+
+### UMAPs before batch correction
+
+
+```{r, warning=FALSE, message=FALSE}
+merge_seurat_object_2 <- merge_seurat_object_2 %>% 
+    RunUMAP(reduction = "harmony", dims = 1:30) 
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+DimPlot(merge_seurat_object_2, reduction = "umap", group.by = "orig.ident", 
+        pt.size = .25) 
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+DimPlot(merge_seurat_object_2, reduction = "umap", group.by = "slide", 
+        pt.size = .1) 
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+palette <- RColorBrewer::brewer.pal(n=7,"Dark2")
+DimPlot(merge_seurat_object_2, reduction = "umap", group.by = "patient_ID", 
+        pt.size = 0.5, cols = palette, split.by = "rep") + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank()) + 
+  labs(title = NULL)
+```
+
+We are additionally going to read deconvolution results to assing each spot to 
+its more abundant broad cell type.
+
+```{r, warning=FALSE, message=FALSE}
+filename_results_C2L_Korean <- 
+  "Cell2Location/results/LocationModelLinearDependentWMultiExperiment_14experiments_36clusters_20654locations_4188genes/W_cell_density_q05.csv"
+
+results_C2L_Korean <- read_csv(filename_results_C2L_Korean) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern = "Count_")) %>%
+  dplyr::mutate(spot_id = str_replace(.$spot_id, pattern = "SN123_A938797_Rep1_" ,
+                                      replacement = "SN123_A938797_Rep1_X_")) 
+
+colnames(results_C2L_Korean) <-
+  str_replace(colnames(results_C2L_Korean), 
+              pattern = "q05_spot_factors", replacement = "")
+
+results_C2L_Korean <- results_C2L_Korean %>% 
+  dplyr::mutate(sample = str_extract(.$spot_id, pattern =".*Rep[1-2]")) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern =".*Rep[1-2]_")) 
+
+
+## We define the different cell types: 
+metadata_Lee_paper <- 
+  read_tsv(file = "Cell2Location/inputs/scRNAseq-ref/raw/metadata.tsv")
+
+## Global results
+
+epithelial_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="Epithelial cells")
+
+
+tumor_epithelial_cells <- epithelial_cells %>%
+  dplyr::filter(Cell_subtype %in% c("CMS1","CMS2","CMS3","CMS4")) %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% dplyr::distinct() 
+tumor_epithelial_cells$Cell_type <- "Tumor Cells"
+
+normal_epithelial_cells <- epithelial_cells %>%
+  dplyr::filter(!(Cell_subtype %in% c("CMS1","CMS2","CMS3","CMS4")))  %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% dplyr::distinct() 
+
+stromal_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="Stromal cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% dplyr::distinct()
+
+myeloid_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="Myeloids") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% dplyr::distinct()
+
+T_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="T cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% dplyr::distinct()
+
+B_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="B cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% dplyr::distinct()
+
+Mast_cells <- metadata_Lee_paper %>% 
+  dplyr::filter(Cell_type=="Mast cells") %>%
+  dplyr::select(Cell_type,Cell_subtype ) %>% dplyr::distinct()
+
+MainCellTypes_labels <- rbind(tumor_epithelial_cells, 
+                              normal_epithelial_cells, 
+                              stromal_cells, 
+                              myeloid_cells,
+                              T_cells, B_cells, Mast_cells) 
+
+
+
+samples_number_assigned <- merge_seurat_object_2@meta.data %>% 
+  tibble::rownames_to_column(var="spot_id") %>% 
+  dplyr::select(spot_id, orig.ident) %>%
+  dplyr::distinct(orig.ident, .keep_all = TRUE) %>%
+  dplyr::mutate(id_to_add = str_remove(spot_id, ".*_")) %>%
+  dplyr::select(orig.ident, id_to_add)
+
+results_C2L_Korean_mainCellLines <- results_C2L_Korean %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") %>%
+  dplyr::left_join(MainCellTypes_labels, by="Cell_subtype") %>%
+  dplyr::select(spot_id, sample, cell_density_q05, Cell_type) %>% 
+  dplyr::group_by(spot_id, sample) %>% 
+  dplyr::slice_max(cell_density_q05, n=1) %>%
+  dplyr::mutate(sample = ifelse(sample == "SN123_A938797_Rep1", "SN123_A938797_Rep1_X", sample)) %>%
+  dplyr::left_join(samples_number_assigned, by = c("sample" = "orig.ident")) %>%
+  dplyr::mutate(spot_id = paste0(spot_id, "_", id_to_add)) %>%
+  dplyr::select(spot_id, sample, Cell_type) %>%
+  dplyr::mutate(spot_id = ifelse(sample == "SN123_A938797_Rep1_X", str_remove(spot_id, "X_"), spot_id))
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300, fig.height=10, fig.width=10}
+merge_seurat_object_2@meta.data  <- 
+  merge_seurat_object_2@meta.data %>% 
+  tibble::rownames_to_column(var="spot_id") %>% 
+  dplyr::left_join(results_C2L_Korean_mainCellLines, by = c("spot_id" = "spot_id",
+             "orig.ident" = "sample")) %>%
+  dplyr::distinct(spot_id, .keep_all = TRUE) %>%
+  tibble::column_to_rownames(var="spot_id")
+
+palette <- RColorBrewer::brewer.pal(n=7,"Dark2")
+DimPlot(merge_seurat_object_2, reduction = "umap", group.by = "patient_ID", 
+        cols = palette, split.by = "rep", shape.by = "Cell_type", pt.size = 0.75) + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.title = element_blank()) + 
+  scale_shape_manual(values=seq(0,6)) + 
+  # scale_size_manual(values=rep(10,7)) + 
+  labs(title = NULL) + 
+  guides(shape = guide_legend(order = 2, override.aes = list(size = 2.5)), 
+         col =guide_legend(order =1, override.aes = list(size = 2.5))) 
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300, fig.height=10, fig.width=10}
+DimPlot(merge_seurat_object_2, reduction = "umap", group.by = "patient_ID", 
+        cols = palette, split.by = "Cell_type", pt.size = 0.5, ncol=4) + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.title = element_blank()) + 
+  scale_shape_manual(values=seq(0,6)) + 
+  # scale_size_manual(values=rep(10,7)) + 
+  labs(title = NULL) + 
+  guides(col =guide_legend(override.aes = list(size = 2.5))) 
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300, fig.height=10, fig.width=10}
+DimPlot(merge_seurat_object_2, reduction = "umap", group.by = "Cell_type", 
+        cols = palette, split.by = "patient_ID", pt.size = 0.5, ncol=4) + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.title = element_blank()) + 
+  scale_shape_manual(values=seq(0,6)) + 
+  # scale_size_manual(values=rep(10,7)) + 
+  labs(title = NULL) + 
+  guides(col =guide_legend(override.aes = list(size = 2.5))) 
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+DimPlot(merge_seurat_object_2, reduction = "umap", group.by = "patient_ID_rep", 
+        pt.size = .25) 
+```
+
+# Conclusion 
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

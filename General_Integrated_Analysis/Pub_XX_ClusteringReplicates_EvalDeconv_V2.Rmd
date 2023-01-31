@@ -1,0 +1,473 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Normalization and Clustering"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script evaluates the correlation between the deconvolution results
+in small clusters that can be considered equivalent between replicates. 
+
+```{r, warning=FALSE,message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(dplyr)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(readr)
+library(stringr)
+library(tidyr)
+library(ggpubr)
+library(purrr)
+library(harmony)
+
+
+# library(EnhancedVolcano)
+source(file = "WrapperFunction/SeuratWrappers.R")
+source(file = "WrapperFunction/ComputeCorrelationReplicates.R")
+
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "IntermediaryFiles/"
+input_names <- "SeuratList_Clusters_Res05.rds"
+
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+```
+
+
+We read the Cell2location results
+
+```{r, message=FALSE, warning=FALSE}
+filename_results_C2L <- 
+  "Cell2Location/results/LocationModelLinearDependentWMultiExperiment_14experiments_36clusters_20654locations_4188genes/W_mRNA_count_q05.csv"
+
+results_C2L <- read_csv(filename_results_C2L) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern = "Count_")) %>%
+  dplyr::mutate(spot_id = str_replace(.$spot_id, pattern = "SN123_A938797_Rep1_" ,
+  replacement = "SN123_A938797_Rep1_X_")) 
+
+colnames(results_C2L) <- str_replace(colnames(results_C2L), 
+    pattern = "q05_nUMI_factors", replacement = "")
+
+cell_types <- colnames(results_C2L[,-1])
+```
+
+```{r, message=FALSE, warning=FALSE}
+## Generating Seurat Objects 
+seurat_objects <- readRDS(files_to_read)
+```
+
+# Clustering together technical replicates
+
+We cluster together the technical replicates to have equivalent regions where
+we can evaluate the proportions of different cell types between different 
+samples
+
+## SN048_A121573_Rep1 & SN048_A121573_Rep2
+
+```{r, message=FALSE, warning=FALSE}
+rep1_name <- "SN048_A121573_Rep1"
+rep2_name <- "SN048_A121573_Rep2"
+
+rep1_seurat_obj <- seurat_objects[[rep1_name]]
+rep2_seurat_obj <- seurat_objects[[rep2_name]]
+
+merge_seurat_object <- 
+  merge(rep1_seurat_obj,rep2_seurat_obj)
+
+rep1_rep2_merge <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_object, slot = "counts"), 
+    min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE) %>% 
+    RunUMAP(dims = 1:30)
+
+rep1_rep2_merge@images <- merge_seurat_object@images
+rep1_rep2_merge@meta.data$orig.ident <- 
+  merge_seurat_object@meta.data$orig.ident  
+```
+
+```{r, warning=FALSE, message=FALSE}
+rep1_rep2_merge <- rep1_rep2_merge %>% 
+    RunHarmony(c("orig.ident"), plot_convergence = TRUE, assay.use = "SCT",
+               max.iter.harmony = 20)
+```
+
+Correlation for different resolution parameters
+
+```{r, warning=FALSE, message=FALSE}
+resolution_pars <- seq(from = 1, to = 2, by = 0.1)
+
+correlations <- resolution_pars %>% 
+  map_dbl(function(x){
+    rep1_rep2_merge <- ComputeClustering(rep1_rep2_merge, x)
+    ComputeCorrelation(rep1_rep2_merge, results_C2L)
+    
+  } )
+df_A121573 <- data.frame(resolution_pars = numeric(length(resolution_pars)))
+df_A121573$resolution_pars <- resolution_pars
+df_A121573$correlations <- correlations
+df_A121573$patient_ID <- "A121573"
+```
+
+## SN048_A416371_Rep1 & SN048_A416371_Rep2
+
+```{r, message=FALSE, warning=FALSE}
+rep1_name <- "SN048_A416371_Rep1"
+rep2_name <- "SN048_A416371_Rep2"
+
+rep1_seurat_obj <- seurat_objects[[rep1_name]]
+rep2_seurat_obj <- seurat_objects[[rep2_name]]
+
+merge_seurat_object <- 
+  merge(rep1_seurat_obj,rep2_seurat_obj)
+
+rep1_rep2_merge <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_object, slot = "counts"), 
+    min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE) %>% 
+    RunUMAP(dims = 1:30)
+
+rep1_rep2_merge@images <- merge_seurat_object@images
+rep1_rep2_merge@meta.data$orig.ident <- 
+  merge_seurat_object@meta.data$orig.ident  
+```
+
+```{r, warning=FALSE, message=FALSE}
+rep1_rep2_merge <- rep1_rep2_merge %>% 
+    RunHarmony(c("orig.ident"), plot_convergence = TRUE, assay.use = "SCT",
+               max.iter.harmony = 20)
+```
+
+Correlation for different resolution parameters
+
+```{r, warning=FALSE, message=FALSE}
+resolution_pars <- seq(from = 1, to = 2, by = 0.1)
+
+correlations <- resolution_pars %>% 
+  map_dbl(function(x){
+    rep1_rep2_merge <- ComputeClustering(rep1_rep2_merge, x)
+    ComputeCorrelation(rep1_rep2_merge, results_C2L)
+    
+  } )
+df_A416371 <- data.frame(resolution_pars = numeric(length(resolution_pars)))
+df_A416371$resolution_pars <- resolution_pars
+df_A416371$correlations <- correlations
+df_A416371$patient_ID <- "A416371"
+```
+
+## SN123_A551763_Rep1 & SN124_A551763_Rep2
+
+To consider these results with care. The SN124_A551763_Rep2 sample does not 
+pass the QC checks. 
+
+```{r, message=FALSE, warning=FALSE}
+rep1_name <- "SN123_A551763_Rep1"
+rep2_name <- "SN124_A551763_Rep2"
+
+rep1_seurat_obj <- seurat_objects[[rep1_name]]
+rep2_seurat_obj <- seurat_objects[[rep2_name]]
+
+merge_seurat_object <- 
+  merge(rep1_seurat_obj,rep2_seurat_obj)
+
+rep1_rep2_merge <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_object, slot = "counts"), 
+    min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE) %>% 
+    RunUMAP(dims = 1:30)
+
+rep1_rep2_merge@images <- merge_seurat_object@images
+rep1_rep2_merge@meta.data$orig.ident <- 
+  merge_seurat_object@meta.data$orig.ident  
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+rep1_rep2_merge <- rep1_rep2_merge %>% 
+    RunHarmony(c("orig.ident"), plot_convergence = TRUE, assay.use = "SCT",
+               max.iter.harmony = 20)
+```
+
+Correlation for different resolution parameters
+
+```{r, warning=FALSE, message=FALSE}
+resolution_pars <- seq(from = 1, to = 2, by = 0.1)
+
+correlations <- resolution_pars %>% 
+  map_dbl(function(x){
+    rep1_rep2_merge <- ComputeClustering(rep1_rep2_merge, x)
+    ComputeCorrelation(rep1_rep2_merge, results_C2L)
+    
+  } )
+df_A551763 <- data.frame(resolution_pars = numeric(length(resolution_pars)))
+df_A551763$resolution_pars <- resolution_pars
+df_A551763$correlations <- correlations
+df_A551763$patient_ID <- "A551763"
+```
+
+## SN123_A595688_Rep1 & SN124_A595688_Rep2
+ 
+
+```{r, message=FALSE, warning=FALSE}
+rep1_name <- "SN123_A595688_Rep1"
+rep2_name <- "SN124_A595688_Rep2"
+
+rep1_seurat_obj <- seurat_objects[[rep1_name]]
+rep2_seurat_obj <- seurat_objects[[rep2_name]]
+
+merge_seurat_object <- 
+  merge(rep1_seurat_obj,rep2_seurat_obj)
+
+rep1_rep2_merge <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_object, slot = "counts"), 
+    min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE) %>% 
+    RunUMAP(dims = 1:30)
+
+rep1_rep2_merge@images <- merge_seurat_object@images
+rep1_rep2_merge@meta.data$orig.ident <- 
+  merge_seurat_object@meta.data$orig.ident  
+```
+
+```{r, warning=FALSE, message=FALSE}
+rep1_rep2_merge <- rep1_rep2_merge %>% 
+    RunHarmony(c("orig.ident"), plot_convergence = TRUE, assay.use = "SCT",
+               max.iter.harmony = 20)
+```
+
+Correlation for different resolution parameters
+
+```{r, warning=FALSE, message=FALSE}
+resolution_pars <- seq(from = 1, to = 2, by = 0.1)
+
+correlations <- resolution_pars %>% 
+  map_dbl(function(x){
+    rep1_rep2_merge <- ComputeClustering(rep1_rep2_merge, x)
+    ComputeCorrelation(rep1_rep2_merge, results_C2L)
+    
+  } )
+df_A595688 <- data.frame(resolution_pars = numeric(length(resolution_pars)))
+df_A595688$resolution_pars <- resolution_pars
+df_A595688$correlations <- correlations
+df_A595688$patient_ID <- "A595688"
+```
+
+## SN123_A798015_Rep1 & SN124_A798015_Rep2
+ 
+
+```{r, message=FALSE, warning=FALSE}
+rep1_name <- "SN123_A798015_Rep1"
+rep2_name <- "SN124_A798015_Rep2"
+
+rep1_seurat_obj <- seurat_objects[[rep1_name]]
+rep2_seurat_obj <- seurat_objects[[rep2_name]]
+
+merge_seurat_object <- 
+  merge(rep1_seurat_obj,rep2_seurat_obj)
+
+rep1_rep2_merge <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_object, slot = "counts"), 
+    min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE) %>% 
+    RunUMAP(dims = 1:30)
+
+rep1_rep2_merge@images <- merge_seurat_object@images
+rep1_rep2_merge@meta.data$orig.ident <- 
+  merge_seurat_object@meta.data$orig.ident  
+```
+
+```{r, warning=FALSE, message=FALSE}
+rep1_rep2_merge <- rep1_rep2_merge %>% 
+    RunHarmony(c("orig.ident"), plot_convergence = TRUE, assay.use = "SCT",
+               max.iter.harmony = 20)
+```
+
+Correlation for different resolution parameters
+
+```{r, warning=FALSE, message=FALSE}
+resolution_pars <- seq(from = 1, to = 2, by = 0.1)
+
+correlations <- resolution_pars %>% 
+  map_dbl(function(x){
+    rep1_rep2_merge <- ComputeClustering(rep1_rep2_merge, x)
+    ComputeCorrelation(rep1_rep2_merge, results_C2L)
+    
+  } )
+df_A798015 <- data.frame(resolution_pars = numeric(length(resolution_pars)))
+df_A798015$resolution_pars <- resolution_pars
+df_A798015$correlations <- correlations
+df_A798015$patient_ID <- "A798015"
+```
+
+## SN123_A938797_Rep1_X & SN124_A938797_Rep2
+ 
+
+```{r, message=FALSE, warning=FALSE}
+rep1_name <- "SN123_A938797_Rep1_X"
+rep2_name <- "SN124_A938797_Rep2"
+
+rep1_seurat_obj <- seurat_objects[[rep1_name]]
+rep2_seurat_obj <- seurat_objects[[rep2_name]]
+
+merge_seurat_object <- 
+  merge(rep1_seurat_obj,rep2_seurat_obj)
+
+rep1_rep2_merge <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_object, slot = "counts"), 
+    min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE) %>% 
+    RunUMAP(dims = 1:30)
+
+rep1_rep2_merge@images <- merge_seurat_object@images
+rep1_rep2_merge@meta.data$orig.ident <- 
+  merge_seurat_object@meta.data$orig.ident  
+```
+
+```{r, warning=FALSE, message=FALSE}
+rep1_rep2_merge <- rep1_rep2_merge %>% 
+    RunHarmony(c("orig.ident"), plot_convergence = TRUE, assay.use = "SCT",
+               max.iter.harmony = 20)
+```
+
+Correlation for different resolution parameters
+
+```{r, warning=FALSE, message=FALSE}
+resolution_pars <- seq(from = 1, to = 2, by = 0.1)
+
+correlations <- resolution_pars %>% 
+  map_dbl(function(x){
+    rep1_rep2_merge <- ComputeClustering(rep1_rep2_merge, x)
+    ComputeCorrelation(rep1_rep2_merge, results_C2L)
+    
+  } )
+df_A938797 <- data.frame(resolution_pars = numeric(length(resolution_pars)))
+df_A938797$resolution_pars <- resolution_pars
+df_A938797$correlations <- correlations
+df_A938797$patient_ID <- "A938797"
+```
+
+## SN84_A120838_Rep1 & SN84_A120838_Rep2
+ 
+
+```{r, message=FALSE, warning=FALSE}
+rep1_name <- "SN84_A120838_Rep1"
+rep2_name <- "SN84_A120838_Rep2"
+
+rep1_seurat_obj <- seurat_objects[[rep1_name]]
+rep2_seurat_obj <- seurat_objects[[rep2_name]]
+
+merge_seurat_object <- 
+  merge(rep1_seurat_obj,rep2_seurat_obj)
+
+rep1_rep2_merge <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_object, slot = "counts"), 
+    min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE) %>% 
+    RunUMAP(dims = 1:30)
+
+rep1_rep2_merge@images <- merge_seurat_object@images
+rep1_rep2_merge@meta.data$orig.ident <- 
+  merge_seurat_object@meta.data$orig.ident  
+```
+
+```{r, warning=FALSE, message=FALSE}
+rep1_rep2_merge <- rep1_rep2_merge %>% 
+    RunHarmony(c("orig.ident"), plot_convergence = TRUE, assay.use = "SCT",
+               max.iter.harmony = 20)
+```
+
+Correlation for different resolution parameters
+
+```{r, warning=FALSE, message=FALSE}
+resolution_pars <- seq(from = 1, to = 2, by = 0.1)
+
+correlations <- resolution_pars %>% 
+  map_dbl(function(x){
+    rep1_rep2_merge <- ComputeClustering(rep1_rep2_merge, x)
+    ComputeCorrelation(rep1_rep2_merge, results_C2L)
+    
+  } )
+df_A120838 <- data.frame(resolution_pars = numeric(length(resolution_pars)))
+df_A120838$resolution_pars <- resolution_pars
+df_A120838$correlations <- correlations
+df_A120838$patient_ID <- "A120838"
+```
+
+## Merge Data frame for boxplot
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+df_all <- rbind(df_A121573,
+  df_A416371,
+  df_A551763,
+  df_A595688,
+  df_A798015,
+  df_A938797,
+  df_A120838)
+
+df_all <- df_all %>%
+  dplyr::left_join(df_patient_ID_transform, c("patient_ID" = "patient"))
+
+
+df_all %>%
+  ggplot( aes(x=patient_ID.y, y=correlations, fill=patient_ID.y)) +
+    geom_boxplot(outlier.size = 0.75, alpha= 0.75) +
+    # scale_fill_brewer(discrete = TRUE, alpha=0.6) +
+    geom_jitter(color="black", size=0.75, alpha=1) +
+    theme_linedraw() +  
+    theme(legend.position="none", axis.title.x = element_blank(), 
+          axis.text = element_text(size=12, face ="bold", family="Arial"),
+          axis.text.x = element_text(angle = 90, hjust=0.95,vjust=0.2), 
+          axis.title.y = element_text(size=16,family="Arial"),
+          axis.ticks = element_blank(),  panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank()) +
+  ylab("Pearson Correlation Coefficients")
+```
+
+
+
+# Conclusion 
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

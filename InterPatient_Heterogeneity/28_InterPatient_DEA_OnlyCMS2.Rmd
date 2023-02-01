@@ -1,0 +1,357 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: DEA tumor VS non-tumor"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/pstore/data/biomics/_pre_portfolio/_platform_evaluation/SpatialTranscriptomics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(readr)
+library(stringr)
+library(purrr)
+library(cowplot)
+library(ggpubr)
+library(msigdbr)
+library(clusterProfiler)
+library(kableExtra)
+library(rrvgo)
+
+source(file = "WrapperFunction/SeuratWrappers.R")
+
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_folder <- "IntermediaryFiles/"
+input_names_1 <- "SeuratList_Clusters_Res05.rds"
+input_names_2 <- "Patho_Annotations/"
+
+files_to_read_1 <- paste0(data_directory, analysis_name,input_folder,input_names_1)
+files_to_read_2 <- paste0(data_directory, analysis_name,input_folder,input_names_2)
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+
+samples_to_consider <- c("SN048_A121573_Rep1", "SN048_A121573_Rep2",
+  "SN123_A595688_Rep1","SN124_A595688_Rep2", "SN123_A938797_Rep1_X", 
+  "SN124_A938797_Rep2", "SN84_A120838_Rep1", "SN84_A120838_Rep2")
+```
+
+I include pathologist annotations to the Seurat objects
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read_1)
+seurat_objects_CMS2 <- seurat_objects[samples_to_consider]
+
+tumor_annotations <- c("tumor")
+
+seurat_objects_CMS2 <- 
+  lapply(seurat_objects_CMS2, function(x){
+    current_sample <- unique(x@meta.data$orig.ident)
+    
+    patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".csv"))
+    
+    colnames(patho_anno_current_sample) <- c("Barcode", "Pathologist_Annotations")
+    
+    x@meta.data <- x@meta.data %>%
+      tibble::rownames_to_column("spot_id") %>%
+      dplyr::left_join(patho_anno_current_sample, by = c("spot_id" = "Barcode")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+        "tumor&stroma IC med to high", "tumor&stroma_IC med to high")) %>% 
+      tibble::column_to_rownames("spot_id") 
+      
+    
+    Idents(x) <- 'Pathologist_Annotations'
+
+    return(x)
+})
+```
+
+# Results
+
+I merge samples from the same patient and perform Differential expression analysis
+
+## Patient A121573
+
+```{r, warning=FALSE, message=FALSE}
+merge_seurat_objects_A121573 <- 
+  merge(x = seurat_objects_CMS2$SN048_A121573_Rep1, 
+        y= seurat_objects_CMS2$SN048_A121573_Rep2)
+
+merge_seurat_objects_A121573_V2 <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_objects_A121573, 
+    slot = "counts"), min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE)
+
+merge_seurat_objects_A121573_V2@meta.data$orig.ident <- 
+  merge_seurat_objects_A121573@meta.data$orig.ident  
+
+merge_seurat_objects_A121573_V2@meta.data$Pathologist_Annotations <- 
+  merge_seurat_objects_A121573@meta.data$Pathologist_Annotation
+
+Idents(merge_seurat_objects_A121573_V2) <- 
+  merge_seurat_objects_A121573@meta.data$Pathologist_Annotation
+
+markers_A121573 <- 
+  FindMarkers(merge_seurat_objects_A121573_V2, ident.1 = "tumor", 
+    only.pos = TRUE, logfc.threshold = 0.25) %>% 
+  tibble::rownames_to_column(var = "gene")
+markers_A121573$patient <- "A121573"
+```
+
+## Patient A595688
+
+```{r, warning=FALSE, message=FALSE}
+merge_seurat_objects_A595688 <- 
+  merge(x = seurat_objects_CMS2$SN123_A595688_Rep1, 
+        y= seurat_objects_CMS2$SN124_A595688_Rep2)
+
+merge_seurat_objects_A595688_V2 <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_objects_A595688, 
+    slot = "counts"), min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE)
+
+merge_seurat_objects_A595688_V2@meta.data$orig.ident <- 
+  merge_seurat_objects_A595688@meta.data$orig.ident  
+
+merge_seurat_objects_A595688_V2@meta.data$Pathologist_Annotations <- 
+  merge_seurat_objects_A595688@meta.data$Pathologist_Annotation
+
+Idents(merge_seurat_objects_A595688_V2) <- 
+  merge_seurat_objects_A595688_V2@meta.data$Pathologist_Annotation
+
+markers_A595688 <- 
+  FindMarkers(merge_seurat_objects_A595688_V2, ident.1 = "tumor", 
+    only.pos = TRUE, logfc.threshold = 0.25) %>% 
+  tibble::rownames_to_column(var = "gene")
+markers_A595688$patient <- "A595688"
+```
+
+
+## Patient A938797
+
+
+```{r, warning=FALSE, message=FALSE}
+merge_seurat_objects_A938797 <- 
+  merge(x = seurat_objects_CMS2$SN123_A938797_Rep1_X, 
+        y= seurat_objects_CMS2$SN124_A938797_Rep2)
+
+merge_seurat_objects_A938797_V2 <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_objects_A938797, 
+    slot = "counts"), min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE)
+
+merge_seurat_objects_A938797_V2@meta.data$orig.ident <- 
+  merge_seurat_objects_A938797@meta.data$orig.ident  
+
+merge_seurat_objects_A938797_V2@meta.data$Pathologist_Annotations <- 
+  merge_seurat_objects_A938797@meta.data$Pathologist_Annotation
+
+Idents(merge_seurat_objects_A938797_V2) <- 
+  merge_seurat_objects_A938797@meta.data$Pathologist_Annotation
+
+markers_A938797 <- 
+  FindMarkers(merge_seurat_objects_A938797_V2, ident.1 = "tumor", 
+    only.pos = TRUE, logfc.threshold = 0.25) %>% 
+  tibble::rownames_to_column(var = "gene")
+markers_A938797$patient <- "A938797"
+```
+
+## Patient A120838
+
+
+```{r, warning=FALSE, message=FALSE}
+merge_seurat_objects_A120838 <- 
+  merge(x = seurat_objects_CMS2$SN84_A120838_Rep1, 
+        y= seurat_objects_CMS2$SN84_A120838_Rep2)
+
+merge_seurat_objects_A120838_V2 <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_objects_A120838, 
+    slot = "counts"), min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE)
+
+merge_seurat_objects_A120838_V2@meta.data$orig.ident <- 
+  merge_seurat_objects_A120838@meta.data$orig.ident  
+
+merge_seurat_objects_A120838_V2@meta.data$Pathologist_Annotations <- 
+  merge_seurat_objects_A120838@meta.data$Pathologist_Annotation
+
+Idents(merge_seurat_objects_A120838_V2) <- 
+  merge_seurat_objects_A120838@meta.data$Pathologist_Annotation
+
+markers_A120838 <- 
+  FindMarkers(merge_seurat_objects_A120838_V2, ident.1 = "tumor", 
+    only.pos = TRUE, logfc.threshold = 0.25) %>% 
+  tibble::rownames_to_column(var = "gene")
+markers_A120838$patient <- "A120838"
+```
+
+## Merge all samples and DEA between patients
+
+Now, I merge all the samples and I perform differential expression analysis
+between patients. 
+
+```{r, warning=FALSE, message=FALSE}
+merge_seurat_objects_CMS2_all <- 
+  merge(x = seurat_objects_CMS2[[1]], 
+        y= seurat_objects_CMS2[-1])
+
+merge_seurat_objects_CMS2_all_V2 <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_objects_CMS2_all, 
+    slot = "counts"), min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE)
+
+merge_seurat_objects_CMS2_all_V2@meta.data$orig.ident <- 
+  merge_seurat_objects_CMS2_all@meta.data$orig.ident  
+
+merge_seurat_objects_CMS2_all_V2@meta.data$Pathologist_Annotations <- 
+  merge_seurat_objects_CMS2_all@meta.data$Pathologist_Annotation
+
+merge_seurat_objects_CMS2_all_V2@meta.data$patient <- 
+  str_match(merge_seurat_objects_CMS2_all_V2@meta.data$orig.ident, "_\\s*(.*?)\\s*_")[,2]
+  
+
+Idents(merge_seurat_objects_CMS2_all_V2) <- 
+  merge_seurat_objects_CMS2_all_V2@meta.data$patient
+
+markers_per_patient <- FindAllMarkers(merge_seurat_objects_CMS2_all_V2, 
+  logfc.threshold = 0.25, only.pos = TRUE) 
+```
+
+And we finally match the genes diffenrtially expressed per patient with those
+that are overepxressed comparing the tumor to the other regions. 
+
+```{r, warning=FALSE, message=FALSE}
+## We filter out ribosomal (RPL and RPS) and mithocondrial genes (MT-) and MTRNR genes
+markers_per_patient_filter <- markers_per_patient %>% 
+  dplyr::filter(str_detect(gene, "^RPL*", negate = TRUE)) %>% 
+  dplyr::filter(str_detect(gene, "^RPS*", negate = TRUE)) %>%
+  dplyr::filter(str_detect(gene, "^MT-*", negate = TRUE)) %>%
+  dplyr::filter(str_detect(gene, "^MTRNR*", negate = TRUE))
+
+
+markers_tumor_all <- rbind.data.frame(markers_A121573, markers_A595688,
+  markers_A938797, markers_A120838)
+
+markers_per_patient_matching <- markers_per_patient_filter %>% 
+  dplyr::semi_join(markers_tumor_all, by = c("cluster" = "patient", "gene"))
+```
+
+## Enrichment results {.tabset}
+
+```{r, warning=FALSE, message=FALSE}
+all_gene_sets <- msigdbr(species = "Homo sapiens")
+
+background_genes <-  rownames(merge_seurat_objects_CMS2_all_V2)
+
+my_sub_categories <- 
+    c("GO:BP")
+my_categories <- c("H")
+
+gene_sets_selected <- 
+  dplyr::filter(all_gene_sets, 
+    # (gs_subcat %in% my_sub_categories)) #  |  
+    (gs_cat %in% my_categories))
+
+msigdbr_t2g <- gene_sets_selected %>% 
+   dplyr::select(gs_name, gene_symbol) %>% 
+  as.data.frame()
+```
+
+```{r, warning=FALSE, message=FALSE, results='asis'}
+my_patients <- as.character(unique(markers_per_patient_matching$cluster))
+results <- data.frame()
+
+for (current_patient in my_patients){
+  
+  cat( "### Patient : ", current_patient , "\n\n" )
+  
+  current_genes <- 
+    dplyr::filter(markers_per_patient_matching, cluster ==current_patient) %>% 
+    dplyr::pull(gene)
+  
+  enrichment_results <- 
+    enricher(gene = current_genes, universe = background_genes, 
+    pvalueCutoff  = 0.05,  pAdjustMethod = "fdr", TERM2GENE = msigdbr_t2g,
+    minGSSize = 3, qvalueCutoff = 0.2) 
+  
+  enrichment_results_sig <- 
+    enrichment_results@result %>% 
+    dplyr::filter(pvalue < 0.05, qvalue < 0.2)  
+  
+  
+  print(enrichment_results_sig %>% dplyr::select(-ID) %>% 
+    kbl() %>%
+    kable_styling())
+  
+  # simMatrix <- 
+  #  calculateSimMatrix(enrichment_results_sig$ID, orgdb="org.Hs.eg.db", 
+  #    ont="BP",method="Resnik")
+  
+  # scores <- 
+  #  setNames(-log10(enrichment_results_sig$qvalue), enrichment_results_sig$ID)
+  # reducedTerms <- reduceSimMatrix(simMatrix,
+  #                              scores,
+  #                              threshold=0.75,
+  #                              orgdb="org.Hs.eg.db")
+
+  
+  cat( "\n\n" )
+  
+  # print(scatterPlot(simMatrix, reducedTerms))
+  
+  # cat( "\n\n" )
+
+  # print(treemapPlot(reducedTerms))
+  
+  # cat( "\n\n" )
+
+}
+```
+
+
+
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

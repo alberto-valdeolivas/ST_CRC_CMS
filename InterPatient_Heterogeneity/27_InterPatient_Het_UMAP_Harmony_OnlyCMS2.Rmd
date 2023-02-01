@@ -1,0 +1,432 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Quality Control: Global Metrics"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Plot Arrangement of Cell2Location results
+
+# Getting Ready
+
+We first load the libraries and set the paths to the raw data. 
+
+```{r, message=FALSE, warning=FALSE}
+library(harmony)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(readr)
+library(stringr)
+library(ggplot2)
+library(ggpubr)
+library(msigdbr)
+library(RColorBrewer)
+library(progeny)
+library(dorothea)
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_folder <- "IntermediaryFiles/"
+input_names_1 <- "SeuratList_Clusters_Res05.rds"
+input_names_2 <- "Patho_Annotations/"
+
+files_to_read_1 <- paste0(data_directory, analysis_name,input_folder,input_names_1)
+files_to_read_2 <- paste0(data_directory, analysis_name,input_folder,input_names_2)
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+
+samples_to_consider <- c("SN048_A121573_Rep1", "SN048_A121573_Rep2",
+  "SN123_A595688_Rep1","SN124_A595688_Rep2", "SN123_A938797_Rep1_X", 
+  "SN124_A938797_Rep2", "SN84_A120838_Rep1", "SN84_A120838_Rep2")
+```
+
+We include pathologist annotations into Seurat objects
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read_1)
+seurat_objects_CMS2 <- seurat_objects[samples_to_consider]
+
+## Attention: in one sample annotated as "tumor&stroma IC med to high"
+## instead of "tumor&stroma IC med to high"
+# tumor_annotations <- 
+#  c("tumor", "tumor&stroma_IC med to high", "tumor&stroma_IC low", 
+#    "tumor&stroma IC med to high")
+tumor_annotations <- 
+  c("tumor")
+
+seurat_objects_CMS2 <- 
+  lapply(seurat_objects_CMS2, function(x){
+    current_sample <- unique(x@meta.data$orig.ident)
+    
+    patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".csv"))
+    
+    colnames(patho_anno_current_sample) <- c("Barcode", "Pathologist_Annotations")
+    
+    x@meta.data <- x@meta.data %>%
+      tibble::rownames_to_column("spot_id") %>%
+      dplyr::left_join(patho_anno_current_sample, by = c("spot_id" = "Barcode")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+        "tumor&stroma IC med to high", "tumor&stroma_IC med to high")) %>% 
+      tibble::column_to_rownames("spot_id") 
+      
+    
+    Idents(x) <- 'Pathologist_Annotations'
+    x <- subset(x, idents = intersect(levels(Idents(x)), tumor_annotations))
+    
+    return(x)
+})
+```
+
+```{r, warning=FALSE, message=FALSE}
+SpatialPlot(seurat_objects_CMS2[[1]], image.alpha = 0.6, stroke = 1, crop = TRUE,
+  pt.size.factor = 1.75, cols = "#FC9272") + NoLegend() + 
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+SpatialPlot(seurat_objects_CMS2[[2]], image.alpha = 0.6, stroke = 1, crop = TRUE,
+  pt.size.factor = 1.75, cols = "#FC9272") + NoLegend() + 
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+SpatialPlot(seurat_objects_CMS2[[3]], image.alpha = 0.6, stroke = 1, crop = TRUE,
+  pt.size.factor = 2.5, cols = "#FC9272") + NoLegend() + 
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+SpatialPlot(seurat_objects_CMS2[[4]], image.alpha = 0.6, stroke = 1, crop = TRUE,
+  pt.size.factor = 2.5, cols = "#FC9272") + NoLegend() + 
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+SpatialPlot(seurat_objects_CMS2[[5]], image.alpha = 0.6, stroke = 1, crop = TRUE,
+  pt.size.factor = 2.25, cols = "#FC9272") + NoLegend() + 
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+SpatialPlot(seurat_objects_CMS2[[6]], image.alpha = 0.6, stroke = 1, crop = TRUE,
+  pt.size.factor = 2.25, cols = "#FC9272") + NoLegend() + 
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+SpatialPlot(seurat_objects_CMS2[[7]], image.alpha = 0.6, stroke = 1, crop = TRUE,
+  pt.size.factor = 3.25, cols = "#FC9272") + NoLegend() + 
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+SpatialPlot(seurat_objects_CMS2[[8]], image.alpha = 0.6, stroke = 1, crop = TRUE,
+  pt.size.factor = 2.25, cols = "#FC9272") + NoLegend() + 
+  theme(plot.margin=grid::unit(c(0,0,0,0), "mm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+merge_seurat_objects_CMS2 <- 
+  merge(x = seurat_objects_CMS2[[1]], y= seurat_objects_CMS2[-1])
+
+
+merge_seurat_objects_CMS2_2 <-  
+  CreateSeuratObject(counts = GetAssayData(merge_seurat_objects_CMS2, slot = "counts"), 
+    min.cells = 5) %>%
+    SCTransform(verbose = FALSE) %>%
+    RunPCA(pc.genes = .@var.genes, npcs = 30, verbose = FALSE)
+
+merge_seurat_objects_CMS2_2@meta.data$orig.ident <- 
+  merge_seurat_objects_CMS2@meta.data$orig.ident  
+
+merge_seurat_objects_CMS2_2@meta.data$Pathologist_Annotations <- 
+  merge_seurat_objects_CMS2@meta.data$Pathologist_Annotations  
+
+rm(seurat_objects_CMS2)
+rm(seurat_objects)
+rm(merge_seurat_objects_CMS2)
+
+merge_seurat_objects_CMS2_2@meta.data$slide <- 
+  merge_seurat_objects_CMS2_2@meta.data$orig.ident %>%
+  str_extract("[^_]+")
+
+merge_seurat_objects_CMS2_2@meta.data$patient <- 
+  str_match(merge_seurat_objects_CMS2_2@meta.data$orig.ident, "_\\s*(.*?)\\s*_")[,2]
+
+merge_seurat_objects_CMS2_2@meta.data$replicate <- 
+  merge_seurat_objects_CMS2_2@meta.data$orig.ident %>%
+  str_remove("[^A]+") %>% 
+  str_replace("A938797_Rep1_X", "A938797_Rep1")
+
+merge_seurat_objects_CMS2_2@meta.data$rep <- 
+  merge_seurat_objects_CMS2_2@meta.data$replicate %>%
+  str_remove("[^R]+")  
+
+merge_seurat_objects_CMS2_2@meta.data$patient_ID <- 
+  dplyr::inner_join(merge_seurat_objects_CMS2_2@meta.data,df_patient_ID_transform) %>% 
+  dplyr::pull(patient_ID)
+
+merge_seurat_objects_CMS2_2@meta.data <- merge_seurat_objects_CMS2_2@meta.data  %>% 
+  dplyr::mutate(patient_ID_rep = paste0(.$patient_ID,str_remove(replicate,"[^_Rep]+")))
+```
+
+# Results
+
+## Before Batch correction
+
+### PCs before batch correction
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+# palette <- RColorBrewer::brewer.pal(n=14, "Paired")
+DimPlot(object = merge_seurat_objects_CMS2_2,  reduction = "pca", 
+  pt.size = .25, group.by = "orig.ident")
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+VlnPlot(object = merge_seurat_objects_CMS2_2, features = "PC_1", 
+              group.by = "orig.ident", pt.size = .1)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+# palette <- RColorBrewer::brewer.pal(n=14, "Paired")
+DimPlot(object = merge_seurat_objects_CMS2_2,  reduction = "pca", 
+  pt.size = .25, group.by = "slide")
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+VlnPlot(object = merge_seurat_objects_CMS2_2, features = "PC_1", 
+              group.by = "patient_ID", pt.size = .1)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+# palette <- RColorBrewer::brewer.pal(n=14, "Paired")
+DimPlot(object = merge_seurat_objects_CMS2_2,  reduction = "pca", 
+  pt.size = .25, group.by = "patient_ID")
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+VlnPlot(object = merge_seurat_objects_CMS2_2, features = "PC_1", 
+              group.by = "slide", pt.size = .1)
+```
+
+### UMAPs before batch correction
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+merge_seurat_objects_CMS2_2 <- merge_seurat_objects_CMS2_2 %>%  RunUMAP(dims = 1:30)
+DimPlot(merge_seurat_objects_CMS2_2, reduction = "umap", group.by = "orig.ident", 
+        pt.size = .1) 
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+DimPlot(merge_seurat_objects_CMS2_2, reduction = "umap", group.by = "slide", 
+        pt.size = .1) 
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+DimPlot(merge_seurat_objects_CMS2_2, reduction = "umap", group.by = "patient_ID", 
+        pt.size = .1) 
+```
+
+## Batch correction with Harmony
+
+We correct batch effects per capture area
+
+```{r,warning=FALSE, message=FALSE}
+merge_seurat_objects_CMS2_2 <- merge_seurat_objects_CMS2_2 %>% 
+    RunHarmony(c("orig.ident"), plot_convergence = TRUE, assay.use = "SCT",
+               max.iter.harmony = 20)
+```
+
+### PCs after batch correction
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+# palette <- RColorBrewer::brewer.pal(n=14, "Paired")
+DimPlot(object = merge_seurat_objects_CMS2_2,  reduction = "harmony", 
+  pt.size = .25, group.by = "orig.ident")
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+VlnPlot(object = merge_seurat_objects_CMS2_2, features = "harmony_1", 
+              group.by = "orig.ident", pt.size = .1)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+# palette <- RColorBrewer::brewer.pal(n=14, "Paired")
+DimPlot(object = merge_seurat_objects_CMS2_2,  reduction = "harmony", 
+  pt.size = .25, group.by = "slide")
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+VlnPlot(object = merge_seurat_objects_CMS2_2, features = "harmony_1", 
+              group.by = "patient_ID", pt.size = .1)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+# palette <- RColorBrewer::brewer.pal(n=14, "Paired")
+DimPlot(object = merge_seurat_objects_CMS2_2,  reduction = "harmony", 
+  pt.size = .25, group.by = "patient_ID")
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+VlnPlot(object = merge_seurat_objects_CMS2_2, features = "harmony_1", 
+              group.by = "slide", pt.size = .1)
+```
+
+### UMAPs before batch correction
+
+
+```{r, warning=FALSE, message=FALSE}
+merge_seurat_objects_CMS2_2 <- merge_seurat_objects_CMS2_2 %>% 
+    RunUMAP(reduction = "harmony", dims = 1:30) 
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+DimPlot(merge_seurat_objects_CMS2_2, reduction = "umap", group.by = "orig.ident", 
+        pt.size = .25) 
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+DimPlot(merge_seurat_objects_CMS2_2, reduction = "umap", group.by = "slide", 
+        pt.size = .1) 
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300, fig.height=8, fig.width=10}
+palette <- RColorBrewer::brewer.pal(n=4,"Dark2")
+DimPlot(merge_seurat_objects_CMS2_2, reduction = "umap", group.by = "patient_ID", 
+        pt.size = 1.5, cols = palette, split.by = "rep") + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.title = element_blank(), legend.text = element_text(size=14), 
+        legend.position = "bottom", legend.justification = "center") + 
+  scale_shape_manual(values=seq(0,6)) + 
+  # scale_size_manual(values=rep(10,7)) + 
+  labs(title = NULL) + 
+  guides(col =guide_legend(order =1, override.aes = list(size = 7), nrow = 1))
+```
+
+## UMAPS including Pathway, gene and TF information
+
+
+We compute pathway and TF activity in the merged object
+
+```{r, warning=FALSE, message=FALSE}
+merge_seurat_objects_CMS2_2 <- 
+  progeny::progeny(merge_seurat_objects_CMS2_2,
+    scale=FALSE, organism="Human", top=500, perm=1,
+    return_assay = TRUE, assay_name = "SCT")  
+
+confidence_levels <- c("A","B","C")
+
+dorothea_regulon <- 
+        get(data("dorothea_hs", package = "dorothea"))  
+
+regulon_filtered <- dorothea_regulon %>%
+      dplyr::filter(confidence %in% confidence_levels)
+
+merge_seurat_objects_CMS2_2 <- 
+          run_viper(merge_seurat_objects_CMS2_2, regulon_filtered, 
+          assay_key = "SCT", 
+                  options = list(
+                    method = "scale", minsize = 4, 
+                    eset.filter = FALSE, cores = 1, verbose = FALSE))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+umap_p1 <- 
+  DimPlot(merge_seurat_objects_CMS2_2, reduction = "umap", group.by = "patient_ID", 
+        pt.size = 1.5, cols = palette) + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.title = element_blank(), legend.text = element_text(size=11), 
+        legend.position = "right", legend.justification = "center") + 
+  scale_shape_manual(values=seq(0,6)) + 
+  # scale_size_manual(values=rep(10,7)) + 
+  labs(title = "Tumor Spots") + 
+  guides(col =guide_legend(order =1, override.aes = list(size = 4)))
+
+DefaultAssay(object = merge_seurat_objects_CMS2_2) <- "SCT"
+
+
+umap_p2 <- 
+  FeaturePlot(merge_seurat_objects_CMS2_2, reduction = "umap", features = "NUPR1", 
+        pt.size = 1.5, cols =c("lightgrey", "#67000D")) + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.text = element_text(size=14), 
+        legend.position = "right", legend.justification = "center") +
+  labs(title = "NUPR1 Expression")  
+
+DefaultAssay(object = merge_seurat_objects_CMS2_2) <- "progeny"
+
+## Between EGFR and MAPK decide. 
+umap_p3 <- 
+  FeaturePlot(merge_seurat_objects_CMS2_2, reduction = "umap", features = "EGFR", 
+        pt.size = 1.5, cols =c("lightgrey", "#67000D")) + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.text = element_text(size=14), 
+        legend.position = "right", legend.justification = "center") +
+  labs(title = "EGFR Pathway Activity")  + 
+  scale_color_gradient2(low = "darkblue", mid ="white", high = "#67000D")
+
+DefaultAssay(object = merge_seurat_objects_CMS2_2) <- "dorothea"
+
+
+
+umap_p4 <- 
+  FeaturePlot(merge_seurat_objects_CMS2_2, reduction = "umap", features = "FOXM1", 
+        pt.size = 1.5, cols =c("blue", "#67000D")) + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.text = element_text(size=14), 
+        legend.position = "right", legend.justification = "center") +
+  labs(title = "FOXM1 TF Activity")  + 
+  scale_color_gradient2(low = "darkblue", mid ="white", high = "#67000D")
+```
+
+```{r, warning=FALSE, message=FALSE, , dpi=300, fig.height=12, fig.width=12}
+umap_p1 + umap_p2 + umap_p3 + umap_p4 + plot_layout(ncol = 2)
+```
+
+
+# Conclusion 
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```
+
+

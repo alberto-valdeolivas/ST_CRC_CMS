@@ -17,8 +17,8 @@ and it is organized as follows:
 * [Sample Characterization](https://github.com/alberto-valdeolivas/ST_CRC_CMS/tree/main/Sample_Characterization): Scripts to characterize the internal and external ST CRC datasets used in our manuscript based on different criteria. Among others, it contains the scripts required to generate the barplots describing the different cell type proportions per sample shown in the figures of the main manuscript. 
 * [General Analysis per Sample](https://github.com/alberto-valdeolivas/ST_CRC_CMS/tree/main/General_Analysis_perSample): Scripts to perform analysis, such as clustering, pathway and TF activity, individually on each sample individually. 
 * [General Integrated analysis](https://github.com/alberto-valdeolivas/ST_CRC_CMS/tree/main/General_Integrated_Analysis): Scripts to perform genenal analysis where the information from all the samples was merged in order to obain the results. This includes, Batch correction and UMAP embeddings, enrichment/depletion plots, Pathway and TF correlations with cell type abundances and some further validations of the deconvolution results. 
-* Inter-patient hetereogeneity: 
-* Intra-patient hetereogeneity: 
+* Inter-patient heterogeneity in CMS2 tumors: 
+* Intra-patient heterogeneity in CMS2 tumors: 
 * Cell-Communication events:
 * Additional analysis in the External ST CRC Dataset:
 * Figure arrangement:

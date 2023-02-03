@@ -1,0 +1,312 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: CMS2 Inter-patient heterogeneity"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes Spatial Omics data generated with 10X technology
+of a set of colorectal cancer samples and explores the inter-patient 
+hetereogeneity in those samples that have been classified as CMS2. To do so, 
+we will perform pseudo-bulk of the CMS2 regions. 
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(dplyr)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(cancersea)
+library(Seurat)
+library(readr)
+library(stringr)
+library(cowplot)
+library(msigdbr)
+library(clusterProfiler)
+library(RColorBrewer)
+
+source(file = "WrapperFunction/SeuratWrappers.R")
+source(file = "WrapperFunction/PseudoBulkUtils.R")
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "IntermediaryFiles/"
+input_names <- "SeuratList_Clusters_Res05.rds"
+
+
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+results_directory <- paste0(data_directory, analysis_name, input_files)
+```
+
+we read the results of the deconvolution containing the total
+number of cells per spot. From that, we compute the cell type proportions per 
+spot. 
+
+```{r, warning=FALSE, message=FALSE}
+data('available_pathways')
+available_pathways
+data('angiogenesis')
+```
+
+```{r warning=FALSE}
+seurat_objects_all <- readRDS(files_to_read)
+
+samples_to_consider <- c("SN048_A121573_Rep1", "SN048_A121573_Rep2",
+  "SN123_A595688_Rep1","SN124_A595688_Rep2", "SN123_A938797_Rep1_X", 
+  "SN124_A938797_Rep2", "SN84_A120838_Rep1", "SN84_A120838_Rep2") 
+
+seurat_objects <- seurat_objects_all[samples_to_consider]
+
+list_cancerCSA <- list(angiogenesis = angiogenesis$symbol, 
+                       apoptosis = apoptosis$symbol, 
+                       cell_cycle = cell_cycle$symbol, 
+                       differentiation = differentiation$symbol,
+                       dna_damage = dna_damage$symbol, 
+                       dna_repair = dna_repair$symbol, 
+                       emt = emt$symbol, 
+                       hypoxia = hypoxia$symbol, 
+                       inflammation = inflammation$symbol, 
+                       invasion = invasion$symbol,
+                       metastasis = metastasis$symbol,
+                       proliferation = proliferation$symbol, 
+                       quiescence = quiescence$symbol, 
+                       stemness = stemness$symbol)
+
+
+seurat_objects <- lapply(seurat_objects, function(x){
+  a <- AddModuleScore(
+    object = x,
+    features = list_cancerCSA,
+    ctrl = 20,
+    name = names(list_cancerCSA))
+  
+  b <- SeuratObject::CreateAssayObject(data = t(a@meta.data[,9:ncol(a@meta.data)])) 
+  
+  Seurat::Key(b) <- "modules_"
+  a[["modules_assay"]] <- b
+  return(a)
+})
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_object <- seurat_objects[["SN123_A595688_Rep1"]]
+DefaultAssay(current_object) <- "modules_assay"
+
+current_gene <- c("metastasis11")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+A595688_Rep1_Metastasis <- 
+  Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("Score Metastasis") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5))#  +
+        # theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        #      axis.title.y = element_text(face ="bold", size=14)) # + 
+      # ylab("HBEGF Expression")
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=100}
+A595688_Rep1_Metastasis
+```
+```{r, warning=FALSE, message=FALSE}
+current_object <- seurat_objects[["SN124_A938797_Rep2"]]
+DefaultAssay(current_object) <- "modules_assay"
+
+current_gene <- c("metastasis11")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+A938797_Rep2_Metastasis <- 
+  Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("Score Metastasis") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5))#  +
+        # theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        #      axis.title.y = element_text(face ="bold", size=14)) # + 
+      # ylab("HBEGF Expression")
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=100}
+A938797_Rep2_Metastasis
+```
+
+
+
+```{r, warning=FALSE, message=FALSE}
+current_object <- seurat_objects[["SN84_A120838_Rep2"]]
+DefaultAssay(current_object) <- "modules_assay"
+
+current_gene <- c("angiogenesis1")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+A120838_Rep2_angiogenesis <- 
+  Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("Score Angiogenesis") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5))#  +
+        # theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        #      axis.title.y = element_text(face ="bold", size=14)) # + 
+      # ylab("HBEGF Expression")
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=100}
+A120838_Rep2_angiogenesis
+```
+```{r, warning=FALSE, message=FALSE}
+current_object <- seurat_objects[["SN84_A120838_Rep2"]]
+DefaultAssay(current_object) <- "modules_assay"
+
+current_gene <- c("emt7")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+A120838_Rep2_Angiogenesis <- 
+  Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("Score EMT") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5))#  +
+        # theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        #      axis.title.y = element_text(face ="bold", size=14)) # + 
+      # ylab("HBEGF Expression")
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=100}
+A120838_Rep2_Angiogenesis
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_object <- seurat_objects[["SN124_A938797_Rep2"]]
+DefaultAssay(current_object) <- "modules_assay"
+
+current_gene <- c("emt7")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+A938797_Rep2_EMT <- 
+  Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("Score EMT") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5))#  +
+        # theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        #      axis.title.y = element_text(face ="bold", size=14)) # + 
+      # ylab("HBEGF Expression")
+```
+```{r, warning=FALSE, message=FALSE}
+current_gene <- c("metastasis11")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+A938797_Rep2_metastasis <- 
+  Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("Score Metastasis") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5))#  +
+        # theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        #      axis.title.y = element_text(face ="bold", size=14)) # + 
+      # ylab("HBEGF Expression")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_gene <- c("invasion10")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+A938797_Rep2_invasion <- 
+  Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("Score Invasion") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5))#  +
+        # theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        #      axis.title.y = element_text(face ="bold", size=14)) # + 
+      # ylab("HBEGF Expression")
+```
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

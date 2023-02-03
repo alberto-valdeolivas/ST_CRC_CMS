@@ -1,0 +1,251 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: TF profiles cluster VS Patho Annotations"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/pstore/data/biomics/_pre_portfolio/_platform_evaluation/SpatialTranscriptomics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes the TF activity profiles based clustering and checks
+the clusters with pathologist annotations. 
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(dplyr)
+library(tibble)
+library(readr)
+library(stringr)
+library(cowplot)
+library(RColorBrewer)
+library(kableExtra)
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_folder <- "IntermediaryFiles/MergeClustering/"
+input_names <- "SeuratObject_dorothea_res05.rds"
+input_names_2 <- "IntermediaryFiles/Patho_Annotations/"
+
+files_to_read <- paste0(data_directory, analysis_name,input_folder,input_names)
+files_to_read_2 <- paste0(data_directory, analysis_name,input_names_2)
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+
+samples_to_consider <- c("SN048_A121573_Rep1", "SN048_A121573_Rep2",
+  "SN123_A595688_Rep1","SN124_A595688_Rep2", "SN123_A938797_Rep1_X", 
+  "SN124_A938797_Rep2", "SN84_A120838_Rep1", "SN84_A120838_Rep2")
+```
+
+Reading Seurat objects
+
+```{r warning=FALSE, message=FALSE}
+seurat_objects_markers <- readRDS(files_to_read)
+Seurat_merge_object <- seurat_objects_markers[[2]]
+DefaultAssay(Seurat_merge_object) <- "SCT"
+```
+
+Reading Pathologist Annotations
+
+```{r, warning=FALSE, message=FALSE}
+tumor_annotations_all <- 
+  c("tumor", "tumor&stroma_IC med to high", "tumor&stroma_IC low", 
+    "tumor&stroma IC med to high")
+tumor_annotations <- 
+  c("tumor")
+
+
+df_patho_annotations <- data.frame()
+
+for (current_sample in samples_to_consider){
+  
+  patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".csv")) %>% 
+    dplyr::mutate(Sample = current_sample)
+  
+  colnames(patho_anno_current_sample) <- 
+    c("Barcode", "Pathologist_Annotations", "Sample")
+  
+  df_patho_annotations <- 
+    rbind(df_patho_annotations, patho_anno_current_sample)
+    
+}
+
+    
+df_cluster_info <- Seurat_merge_object@meta.data %>% 
+  tibble::rownames_to_column(var = "Barcode") %>% 
+  dplyr::mutate(Barcode = str_remove(Barcode, "_[0-9]$")) %>% 
+  dplyr::select(Barcode, orig.ident, dorothea_snn_res.0.5) %>% 
+  dplyr::rename(Sample = orig.ident)
+
+df_patho_annotations_clusterID <- 
+  left_join(df_patho_annotations, df_cluster_info) %>% 
+  dplyr::filter(Pathologist_Annotations != "exclude") %>% 
+      dplyr::mutate(Pathologist_Annotations  = str_replace(Pathologist_Annotations, 
+       "tumor&stroma IC med to high", "tumor&stroma_IC med to high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "epitehlium&submucosa", "epithelium&submucosa")) %>% 
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggregate submucosa", "IC aggregate_submucosa")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggregregate_submucosa", "IC aggregate_submucosa")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggreates_stroma or muscularis", "IC aggregate_stroma or muscularis")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggragate_stroma or muscularis", "IC aggregate_stroma or muscularis")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggreates_stroma or muscularis", "IC aggregate_stroma or muscularis")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggregate_muscularis or stroma", "IC aggregate_stroma or muscularis")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma desmoplastic_IC low", "stroma_desmoplastic_IC low")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma desmoplastic_IC med to high", "stroma_desmoplastic_IC med to high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma_fibroblastic_IC high", "stroma_fibroblastic_IC_high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma_fibroblastic_IC med", "stroma_fibroblastic_IC_med")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma_fibroblastic_IC_med", "stroma_fibroblastic_IC med to high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "stroma_fibroblastic_IC_high", "stroma_fibroblastic_IC med to high")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "submucosa", "lamina propria")) %>% 
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "epithelium&submucosa", "epithelium&lam propria")) %>% 
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+       "IC aggregate_submucosa", "IC aggregate_lam propria")) %>% 
+  dplyr::filter(!is.na(dorothea_snn_res.0.5))
+```
+
+
+
+## Fraction of annotations per cluster
+
+```{r, warning=FALSE, message=FALSE}
+df_patho_annotations_clusterID %>% 
+  dplyr::count(Pathologist_Annotations,dorothea_snn_res.0.5) %>% 
+  dplyr::group_by(dorothea_snn_res.0.5 ) %>% 
+  dplyr::mutate(proportion = n/sum(n)) %>% 
+  dplyr::arrange(dorothea_snn_res.0.5, desc(proportion)) %>% 
+  kbl() %>% 
+  kable_styling()
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+df_patho_annotations_clusterID %>% 
+  # dplyr::filter(dorothea_snn_res.0.5 == 0) %>% 
+  ggplot(aes(Pathologist_Annotations, fill = dorothea_snn_res.0.5)) + 
+    geom_bar(col ="Black") + 
+  theme_minimal() + 
+  coord_flip() + 
+  scale_fill_brewer(palette = "Paired") + 
+  theme( # remove the vertical grid lines
+    # panel.grid.major = element_blank(), 
+    axis.title.y = element_blank(), 
+    axis.title.x = element_text(size=12, face = "bold", family="Arial"), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=10, face = "bold", family="Arial")) + 
+  labs(x ="Pathologist Annotations", y= "Number of Spots") + 
+  theme(legend.position ="bottom",  
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_text(size=14, face="bold", family="Arial")) +
+  guides(fill=guide_legend(title="Cluster ID"))
+```
+
+## Number of spots per cluster and sample
+
+```{r, warning=FALSE, message=FALSE}
+df_patho_annotations_clusterID$slide <- 
+  df_patho_annotations_clusterID$Sample %>%
+  str_extract("[^_]+")
+
+df_patho_annotations_clusterID$patient <- 
+  str_match(df_patho_annotations_clusterID$Sample, "_\\s*(.*?)\\s*_")[,2]
+
+df_patho_annotations_clusterID$replicate <- 
+  df_patho_annotations_clusterID$Sample %>%
+  str_remove("[^A]+") %>% 
+  str_replace("A938797_Rep1_X", "A938797_Rep1")
+
+df_patho_annotations_clusterID$rep <- 
+  df_patho_annotations_clusterID$replicate %>%
+  str_remove("[^R]+")  
+
+df_patho_annotations_clusterID <- 
+  dplyr::inner_join(df_patho_annotations_clusterID,df_patient_ID_transform) %>%
+  dplyr::mutate(patient_ID_Rep = paste0(.$patient_ID,.$rep))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+df_patho_annotations_clusterID %>% 
+  dplyr::count(patient_ID_Rep, dorothea_snn_res.0.5) %>% 
+  dplyr::arrange(dorothea_snn_res.0.5, patient_ID_Rep)%>%
+  kbl() %>% 
+  kable_styling()
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+df_patho_annotations_clusterID$patient_ID_Rep <- 
+  factor(df_patho_annotations_clusterID$patient_ID_Rep , 
+         levels = sort(unique(df_patho_annotations_clusterID$patient_ID_Rep), decreasing = TRUE))
+
+
+df_patho_annotations_clusterID %>%
+  # dplyr::filter(dorothea_snn_res.0.5 == 0) %>% 
+  ggplot(aes(patient_ID_Rep, fill = dorothea_snn_res.0.5)) + 
+    geom_bar(col ="Black") + 
+  theme_minimal() + 
+  coord_flip() + 
+  scale_fill_brewer(palette = "Paired") + 
+  theme( # remove the vertical grid lines
+    # panel.grid.major = element_blank(), 
+    axis.title.y = element_blank(), 
+    axis.title.x = element_text(size=12, face = "bold", family="Arial"), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=10, face = "bold", family="Arial")) + 
+  labs(x ="Pathologist Annotations", y= "Number of Spots") + 
+  theme(legend.position ="bottom",  
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_text(size=14, face="bold", family="Arial")) +
+  guides(fill=guide_legend(title="Cluster ID"))
+```
+
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```
+

@@ -1,0 +1,455 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: CMS2 Inter-patient heterogeneity"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/pstore/data/biomics/_pre_portfolio/_platform_evaluation/SpatialTranscriptomics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes Spatial Omics data generated with 10X technology
+of a set of colorectal cancer samples and explores the inter-patient 
+hetereogeneity in those samples that have been classified as CMS2. To do so, 
+we will perform pseudo-bulk of the CMS2 regions. 
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(dplyr)
+library(tibble)
+library(readr)
+library(stringr)
+library(ggplot2)
+library(cowplot)
+library(msigdbr)
+library(clusterProfiler)
+library(RColorBrewer)
+
+source(file = "WrapperFunction/SeuratWrappers.R")
+source(file = "WrapperFunction/PseudoBulkUtils.R")
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "IntermediaryFiles/"
+input_names <- "SeuratList_Clusters_Res05_Dorothea.rds"
+
+
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+results_directory <- paste0(data_directory, analysis_name, input_files)
+```
+
+we read the results of the deconvolution containing the total
+number of cells per spot. From that, we compute the cell type proportions per 
+spot. 
+
+
+## Integration
+
+```{r warning=FALSE, message=FALSE}
+seurat_objects_all <- readRDS(files_to_read)
+
+samples_to_consider <- c("SN048_A121573_Rep1", "SN048_A121573_Rep2",
+  "SN123_A595688_Rep1","SN124_A595688_Rep2", "SN123_A938797_Rep1_X", 
+  "SN124_A938797_Rep2", "SN84_A120838_Rep1", "SN84_A120838_Rep2") 
+
+seurat_objects <- seurat_objects_all[samples_to_consider]
+
+Seurat.merge <- merge(seurat_objects[[1]], seurat_objects[-1])
+
+DefaultAssay(Seurat.merge) <- "dorothea"
+Seurat.merge <- ScaleData(Seurat.merge)
+Seurat.merge <- RunPCA(Seurat.merge, verbose = FALSE, features = rownames(Seurat.merge))
+Seurat.merge <- FindNeighbors(Seurat.merge, dims = 1:10, verbose = FALSE)
+Seurat.merge <- FindClusters(Seurat.merge, verbose = FALSE, resolution = 0.5)
+Seurat.merge <- RunUMAP(Seurat.merge, dims = 1:10)
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=100}
+palette <- RColorBrewer::brewer.pal(n=length(levels(Seurat.merge)),"Paired")
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+
+Seurat.merge@meta.data$patient_ID <- 
+  str_match(Seurat.merge@meta.data$orig.ident, "_\\s*(.*?)\\s*_")[,2] %>%
+  as_tibble_col(column_name = "patient") %>% 
+  dplyr::left_join(df_patient_ID_transform) %>%
+  dplyr::pull(patient_ID)
+
+DimPlot(Seurat.merge, reduction = "umap", # shape.by = "dorothea_snn_res.0.5", 
+        pt.size = 0.75, cols = palette, split.by = "patient_ID") + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.title = element_text(size=14, face="bold")) +
+  guides(col =guide_legend(title="Cluster ID", override.aes = list(size = 3.5))) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+umap_clustering <- 
+  DimPlot(Seurat.merge, reduction = "umap", # shape.by = "dorothea_snn_res.0.5", 
+        pt.size = 0.75, cols = palette) + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.title = element_blank(), legend.justification = "center", 
+        plot.title = element_text(hjust = 0.5)) +
+  guides(col =guide_legend(title="Cluster ID", override.aes = list(size = 3.5))) + 
+  labs(title = "Cluster ID") 
+
+DefaultAssay(object = Seurat.merge) <- "dorothea"
+
+umap_MYC <- 
+  FeaturePlot(Seurat.merge, reduction = "umap", features = "MYC", 
+        pt.size = 1.25) +  
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.text = element_text(size=14), 
+        legend.position = "right", legend.justification = "center") +
+  labs(title = "MYC TF Activity")  + 
+  scale_color_gradient2(low = "lightblue", mid ="white", high = "#67000D")
+
+umap_E2F4 <- 
+  FeaturePlot(Seurat.merge, reduction = "umap", features = "E2F4", 
+        pt.size = 1.25) + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.text = element_text(size=14), 
+        legend.position = "right", legend.justification = "center") +
+  labs(title = "E2F4 TF Activity")   + 
+  scale_color_gradient2(low = "lightblue", mid ="white", high = "#67000D")
+
+umap_JUN <- 
+  FeaturePlot(Seurat.merge, reduction = "umap", features = "JUN", 
+        pt.size = 1.25) +  #, cols =c("blue", "#67000D")) + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.text = element_text(size=14), 
+        legend.position = "right", legend.justification = "center") +
+  labs(title = "JUN TF Activity")  + 
+  scale_color_gradient2(low = "lightblue", mid ="white", high ="#67000D")
+
+umap_ETS1 <- 
+  FeaturePlot(Seurat.merge, reduction = "umap", features = "ETS1", 
+        pt.size = 1.25) + 
+  theme(axis.ticks = element_blank(), axis.text = element_blank(), 
+        legend.text = element_text(size=14), 
+        legend.position = "right", legend.justification = "center") +
+  labs(title = "ETS1 TF Activity")  + 
+  scale_color_gradient2(low = "lightblue", mid ="white", high = "#67000D")
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300, fig.height=6, fig.width=10}
+umap_clustering + umap_MYC + umap_ETS1
+```
+
+
+## Clustering Results {.tabset}
+
+```{r, warning=FALSE, message=FALSE, results='asis'} 
+a <- 1
+for (current_sample in samples_to_consider){
+  
+  cat( "### Sample :", current_sample ,"\n\n" )  
+  
+  seurat_subset <- 
+    subset(x = Seurat.merge, subset = orig.ident == current_sample)
+  
+  print(SpatialDimPlot(seurat_subset, images =  Images(seurat_subset)[a], 
+    pt.size.factor = 1.75, image.alpha = 0.25, cols = palette, stroke = 0))# 
+  
+  
+  print(SpatialDimPlot(seurat_subset, 
+    cells.highlight = CellsByIdentities(object = seurat_subset, 
+    idents = levels(Idents(seurat_subset))), 
+                 facet.highlight = TRUE, ncol = 3, 
+    images = Images(seurat_subset)[a],
+    cols.highlight=c("blue", "red"), image.alpha = 0.25))
+  
+  
+  a <- a + 1 
+  
+  cat( "\n\n" ) 
+  
+}
+```
+
+### Cluster Plot Publication
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A121573_Rep1"
+a <- 1
+
+seurat_subset <- 
+    subset(x = Seurat.merge, subset = orig.ident == current_sample)
+
+
+spatial_plot_A121573_Rep1 <- 
+  SpatialDimPlot(seurat_subset, images =  Images(seurat_subset)[a], 
+    pt.size.factor = 1.75, image.alpha = 0.25, cols = palette, stroke = 0) + 
+  NoLegend() + theme_void() + 
+  theme(legend.position ="bottom",  
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_text(size=14, face="bold", family="Arial")) + 
+  guides(fill=guide_legend(title="Cluster ID", override.aes = list(size = 5)))
+
+
+### 
+
+current_sample <- "SN048_A121573_Rep2"
+a <- 2
+
+seurat_subset <- 
+    subset(x = Seurat.merge, subset = orig.ident == current_sample)
+
+
+spatial_plot_A121573_Rep2 <- 
+  SpatialDimPlot(seurat_subset, images =  Images(seurat_subset)[a], 
+    pt.size.factor = 1.75, image.alpha = 0.25, cols = palette, stroke = 0) + NoLegend() 
+
+### 
+
+current_sample <- "SN123_A595688_Rep1"
+a <- 3
+
+seurat_subset <- 
+    subset(x = Seurat.merge, subset = orig.ident == current_sample)
+
+
+spatial_plot_A595688_Rep1 <- 
+  SpatialDimPlot(seurat_subset, images =  Images(seurat_subset)[a], 
+    pt.size.factor = 2, image.alpha = 0.25, cols = palette, stroke = 0) + NoLegend() 
+
+### 
+
+current_sample <- "SN124_A595688_Rep2"
+a <- 4
+
+seurat_subset <- 
+    subset(x = Seurat.merge, subset = orig.ident == current_sample)
+
+
+spatial_plot_A595688_Rep2 <- 
+  SpatialDimPlot(seurat_subset, images =  Images(seurat_subset)[a], 
+    pt.size.factor = 2.25, image.alpha = 0.25, cols = palette, stroke = 0) + NoLegend() 
+
+### 
+
+current_sample <- "SN123_A938797_Rep1_X"
+a <- 5
+
+seurat_subset <- 
+    subset(x = Seurat.merge, subset = orig.ident == current_sample)
+
+
+spatial_plot_A938797_Rep1 <- 
+  SpatialDimPlot(seurat_subset, images =  Images(seurat_subset)[a], 
+    pt.size.factor = 1.75, image.alpha = 0.25, cols = palette, stroke = 0) + NoLegend() 
+
+### 
+
+current_sample <- "SN124_A938797_Rep2"
+a <- 6
+
+seurat_subset <- 
+    subset(x = Seurat.merge, subset = orig.ident == current_sample)
+
+
+spatial_plot_A938797_Rep2 <- 
+  SpatialDimPlot(seurat_subset, images =  Images(seurat_subset)[a], 
+    pt.size.factor = 1.75, image.alpha = 0.25, cols = palette, stroke = 0) + NoLegend() 
+
+### 
+
+current_sample <- "SN84_A120838_Rep1"
+a <- 7
+
+seurat_subset <- 
+    subset(x = Seurat.merge, subset = orig.ident == current_sample)
+
+
+spatial_plot_A120838_Rep1 <- 
+  SpatialDimPlot(seurat_subset, images =  Images(seurat_subset)[a], 
+    pt.size.factor = 2.75, image.alpha = 0.25, cols = palette, stroke = 0) + NoLegend() 
+
+### 
+
+current_sample <- "SN84_A120838_Rep2"
+a <- 8
+
+seurat_subset <- 
+    subset(x = Seurat.merge, subset = orig.ident == current_sample)
+
+
+spatial_plot_A120838_Rep2 <- 
+  SpatialDimPlot(seurat_subset, images =  Images(seurat_subset)[a], 
+    pt.size.factor = 2.25, image.alpha = 0.25, cols = palette, stroke = 0) + NoLegend() 
+```
+
+```{r, warning=FALSE, message=FALSE}
+
+clusters_legend <- get_legend(spatial_plot_A121573_Rep1)
+spatial_plot_A121573_Rep1_noLegend <- spatial_plot_A121573_Rep1 + NoLegend()
+
+spatial_plot_A595688_Rep1 +  plot_spacer() + spatial_plot_A595688_Rep2 + 
+  spatial_plot_A120838_Rep1 + plot_spacer() + spatial_plot_A120838_Rep2 + 
+  spatial_plot_A121573_Rep1_noLegend + plot_spacer() + spatial_plot_A121573_Rep2 +
+  spatial_plot_A938797_Rep1 + plot_spacer() + spatial_plot_A938797_Rep2 + 
+  plot_spacer() +  ggpubr::as_ggplot(clusters_legend) + plot_spacer() + 
+  plot_layout(widths = c(5, -2.5, 5), heights = c(2,2,2,2,0.25))
+```
+
+
+
+
+## Cluster TF markers {.tabset}
+
+```{r, warning=FALSE, message=FALSE}
+TFmarkers <- 
+  FindAllMarkers(Seurat.merge, only.pos = TRUE, min.pct = 0.25, 
+    logfc.threshold = 1, verbose = FALSE, test.use="roc")
+
+visualization_TFs <- TFmarkers %>% 
+  dplyr::group_by(cluster) %>% 
+  dplyr::slice_max(avg_log2FC, n = 10) %>% 
+  dplyr::filter(avg_log2FC>1.25) %>% 
+  dplyr::pull(gene)
+```
+
+
+
+```{r, warning=FALSE, message=FALSE}
+DoHeatmap(Seurat.merge, features = visualization_TFs, angle = 0, 
+          size=4, hjust=0.5,group.colors = palette) + NoLegend() + 
+  scale_y_discrete(labels=c("MYC"=expression(bold("MYC")), "JUN"=expression(bold("JUN")),
+      "E2F4"=expression(bold("E2F4")), "ETS1"=expression(bold("ETS1")), parse=TRUE))
+```
+
+
+```{r, warning=FALSE, message=FALSE, results='asis'}
+for (current_tf in visualization_TFs){
+  
+  cat( "### TF :", current_tf ,"\n\n" )
+  
+  print(VlnPlot(Seurat.merge, features = current_tf))
+  cat( "\n\n")
+    
+} 
+```
+
+## Enrichment Results {.tabset}
+
+```{r, warning=FALSE, message=FALSE}
+my_categories <- c("H")
+my_sub_categories <- 
+   c("CP:KEGG", "CP:REACTOME", "CP:BIOCARTA", "GO:BP", "GO:CC","GO:MF")
+all_gene_sets <- msigdbr(species = "Homo sapiens")
+
+gene_sets_selected <- 
+  dplyr::filter(all_gene_sets, 
+    (gs_subcat %in% my_sub_categories)  |  (gs_cat %in% my_categories))
+
+msigdbr_t2g <- gene_sets_selected %>% 
+   dplyr::select(gs_name, gene_symbol) %>% 
+  as.data.frame()
+
+```
+
+```{r, warning=FALSE, message=FALSE, results='asis'}
+nr_results <- 12
+threshold <- 0.01
+all_genes <- rownames(Seurat.merge)
+
+for (current_cluster in unique(Idents(Seurat.merge)) ){
+
+  selected_genes <- TFmarkers %>% 
+    dplyr::filter(cluster == current_cluster) %>% 
+    dplyr::pull(gene)
+  
+  enrichment_results <- enricher(selected_genes,  universe = all_genes, 
+   pvalueCutoff = 0.01,  pAdjustMethod = "fdr", TERM2GENE = msigdbr_t2g)
+  
+  Toplot_df <- enrichment_results@result %>% 
+        dplyr::top_n(nr_results, desc(pvalue )) %>% 
+        # ungroup() %>% 
+        mutate(logPvalue = -log(pvalue)) %>%
+        mutate(ID_toplot = substr(ID, 1,50))
+      
+  cat( "### Cluster :", current_cluster ,"\n\n" )
+  
+  plot_enrichment <- ggplot(Toplot_df, aes(logPvalue, 
+                                               reorder(ID_toplot, logPvalue))) +
+        geom_col(aes(fill=logPvalue)) + # facet_wrap(~ source) + 
+        scale_fill_gradient(low = "#FFA07A", high = "#800000", 
+                            na.value = "whitesmoke") +   
+        theme_minimal() + 
+        theme(legend.position = "bottom", 
+              legend.text = element_text(size = 8, hjust = 1, angle = 90),
+              axis.text.x = element_text(angle = 0, hjust = 0, size = 8, face="bold"), 
+              axis.text.y = element_text(angle = 0, hjust = 1, size = 8, face="bold")) + 
+        # ylab(paste0("Pathways and Ontologies")) +
+        ylab(paste0("")) + 
+        xlab(paste0("-Log (p-Value)")) + 
+        labs(fill = "-Log (p-Value)") + 
+        scale_x_continuous(position = "bottom") + 
+        # facet_grid(vars(source), scales = "free", space = "free") + 
+        geom_vline(xintercept = -log(threshold), linetype = "dashed", 
+                   colour = "steelblue", size = 1) + 
+        ggtitle(paste0("sample: ", current_sample))
+  
+  print(plot_enrichment)
+  
+  cat( "\n\n")
+    
+}  
+```
+
+
+```{r, warning=FALSE,message=FALSE, eval=TRUE}
+filename_SeuratObject <- 
+  paste0(data_directory, analysis_name, input_files, 
+      "MergeClustering/", "SeuratObject_dorothea_res05.rds")
+
+saveRDS(list(TFmarkers, Seurat.merge), file = filename_SeuratObject)
+
+
+Seurat.merge@meta.data %>% 
+  tibble::rownames_to_column(var="spot_id") %>% 
+  plyr::mutate(spot_id = str_remove(spot_id, "_[1-9]")) %>% 
+  dplyr::mutate(spot_id=paste0("Count_",orig.ident, "_",spot_id)) %>%
+  dplyr::mutate(spot_id=str_replace(spot_id, "SN123_A938797_Rep1_X","SN123_A938797_Rep1")) %>%
+  dplyr::mutate(orig.ident = str_replace(orig.ident, "SN123_A938797_Rep1_X", "SN123_A938797_Rep1")) %>%
+  write_delim(file = paste0(data_directory, analysis_name, input_files, 
+      "MergeClustering/", "MetadataClustersDorothea.tsv"), delim = "\t", 
+      col_names = TRUE)
+```
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```
+
+

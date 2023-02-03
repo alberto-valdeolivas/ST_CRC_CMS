@@ -1,0 +1,410 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Misty"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/pstore/data/biomics/_pre_portfolio/_platform_evaluation/SpatialTranscriptomics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning=FALSE, message=FALSE}
+library(dplyr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(patchwork, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+library(Seurat, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(tibble, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(readr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(stringr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(ggplot2, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(cowplot, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(msigdbr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(clusterProfiler, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(RColorBrewer, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(mistyR, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(purrr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(kableExtra, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "IntermediaryFiles/"
+input_names <- "MergeClustering/SeuratObject_dorothea_res05.rds"
+input_names_2 <- "SeuratList_Clusters_Res05_Dorothea.rds"
+
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+files_to_read_2 <- paste0(data_directory, analysis_name,input_files,input_names_2)
+results_directory <- paste0(data_directory, analysis_name, input_files)
+```
+
+```{r, warning=FALSE, message=FALSE}
+## Misty required functions
+run_misty_seurat <- function(visium.slide,
+                             # Seurat object with spatial transcriptomics data.
+                             view.assays,
+                             # Named list of assays for each view.
+                             view.features,
+                             # Named list of features/markers to use.
+                             # Use all by default.
+                             view.types,
+                             # Named list of the type of view to construct
+                             # from the assay.
+                             view.params,
+                             # Named list with parameters (NULL or value)
+                             # for each view.
+                             spot.ids = NULL,
+                             # spot IDs to use. Use all by default.
+                             out.alias = "results"
+                             # folder name for output
+) {
+  # Extracting geometry
+  geometry <- GetTissueCoordinates(visium.slide,
+                                   cols = c("row", "col"), scale = NULL
+  )
+  # Extracting data
+  view.data <- map(view.assays,
+                   extract_seurat_data,
+                   geometry = geometry,
+                   visium.slide = visium.slide
+  )
+  # Constructing and running a workflow
+  build_misty_pipeline(
+    view.data = view.data,
+    view.features = view.features,
+    view.types = view.types,
+    view.params = view.params,
+    geometry = geometry,
+    spot.ids = spot.ids,
+    out.alias = out.alias
+  )
+}
+
+
+
+
+# Extracts data from an specific assay from a Seurat object
+# and aligns the IDs to the geometry
+extract_seurat_data <- function(visium.slide,
+                                assay,
+                                geometry) {
+  data <- GetAssayData(visium.slide, assay = assay) %>% as.matrix() %>%
+    t() %>%
+    as_tibble(rownames = NA)
+  return(data %>% slice(match(rownames(.), rownames(geometry))))
+}
+# Filters data to contain only features of interest
+filter_data_features <- function(data,
+                                 features) {
+  if (is.null(features)) features <- colnames(data)
+  return(data %>% rownames_to_column() %>%
+           dplyr::select(rowname, all_of(features)) %>% rename_with(make.names) %>%
+           column_to_rownames())
+}
+
+
+## View creation
+
+
+
+# Builds views depending on the paramaters defined
+create_default_views <- function(data,
+                                 view.type,
+                                 view.param,
+                                 view.name,
+                                 spot.ids,
+                                 geometry) {
+  view.data.init <- create_initial_view(data)
+  if (!(view.type %in% c("intra", "para", "juxta"))) {
+    view.type <- "intra"
+  }
+  if (view.type == "intra") {
+    data.red <- view.data.tmp$data %>%
+      rownames_to_column() %>%
+      filter(rowname %in% spot.ids) %>%
+      dplyr::select(-rowname)
+  } else if (view.type == "para") {
+    view.data.tmp <- view.data.init %>%
+      add_paraview(geometry, l = view.param)
+    data.ix <- paste0("paraview.", view.param)
+    data.red <- view.data.tmp[[data.ix]]$data %>%
+      mutate(rowname = rownames(data)) %>%
+      filter(rowname %in% spot.ids) %>%
+      dplyr::select(-rowname)
+  } else if (view.type == "juxta") {
+    view.data.tmp <- view.data.init %>%
+      add_juxtaview(
+        positions = geometry,
+        neighbor.thr = view.param
+      )
+    data.ix <- paste0("juxtaview.", view.param)
+    data.red <- view.data.tmp[[data.ix]]$data %>%
+      mutate(rowname = rownames(data)) %>%
+      filter(rowname %in% spot.ids) %>%
+      dplyr::select(-rowname)
+  }
+  if (is.null(view.param) == TRUE) {
+    misty.view <- create_view(
+      paste0(view.name),
+      data.red
+    )
+  } else {
+    misty.view <- create_view(
+      paste0(view.name, "_", view.param),
+      data.red
+    )
+  }
+  clear_cache(view.data.init$misty.uniqueid)
+  return(misty.view)
+}
+
+
+## Building a mistyR pipeline and running the model
+
+
+# Builds automatic MISTy workflow and runs it
+build_misty_pipeline <- function(view.data,
+                                 view.features,
+                                 view.types,
+                                 view.params,
+                                 geometry,
+                                 spot.ids = NULL,
+                                 out.alias = "default") {
+  # Adding all spots ids in case they are not defined
+  if (is.null(spot.ids)) {
+    spot.ids <- rownames(view.data[[1]])
+  }
+  # First filter the features from the data
+  view.data.filt <- map2(view.data, view.features, filter_data_features)
+  # Create initial view
+  views.main <- create_initial_view(view.data.filt[[1]] %>%
+                                      rownames_to_column() %>%
+                                      filter(rowname %in% spot.ids) %>%
+                                      dplyr::select(-rowname))
+  # Create other views
+  view.names <- names(view.data.filt)
+  all.views <- pmap(list(
+    view.data.filt[-1],
+    view.types[-1],
+    view.params[-1],
+    view.names[-1]
+  ),
+  create_default_views,
+  spot.ids = spot.ids,
+  geometry = geometry
+  )
+  pline.views <- add_views(
+    views.main,
+    unlist(all.views, recursive = FALSE)
+  )
+  # Run MISTy
+  run_misty(pline.views, out.alias)
+}
+```
+
+
+## Reading Seurat objects and TF differentially activated 
+
+
+```{r warning=FALSE, message=FALSE}
+seurat_objects_markers <- readRDS(files_to_read)
+Seurat_merge_object <- seurat_objects_markers[[2]]
+```
+
+We select the TFs whose activity we are aiming at predicting. 
+
+```{r, warning=FALSE, message=FALSE}
+TF_to_predict <- seurat_objects_markers[[1]] %>% 
+  dplyr::filter(cluster== "1") %>% 
+  dplyr::filter(myAUC >= 0.75) %>%
+  dplyr::pull(gene) %>% unique()
+```
+
+We select genes that are annoated as ligands in OmniPath and expressed in our
+regions in every sample. We select the same ligands as used in LIANA for 
+consistency with the next section. 
+
+```{r, warning=FALSE, message=FALSE}
+omni_resources <- readRDS(system.file(package = "liana", 
+  "omni_resources.rds"))
+ligands_omni <- unique(omni_resources$OmniPath$source_genesymbol)
+```
+
+Which of those ligands are expressed in the tumor region in all of our slides
+in more than 15% of the spots? 
+
+```{r, warning=FALSE, message=FALSE}
+samples_to_consider <- c("SN048_A121573_Rep1", "SN048_A121573_Rep2",
+  "SN123_A595688_Rep1","SN124_A595688_Rep2", "SN123_A938797_Rep1_X", 
+  "SN124_A938797_Rep2", "SN84_A120838_Rep1", "SN84_A120838_Rep2") 
+
+coverage_threshold <- 0.1
+
+list_slide_ligands <- list()
+
+cluster_id_tumor_micro <- c("0", "1")
+cluster_id_others <- 
+  levels(Idents(Seurat_merge_object))[!(levels(Idents(Seurat_merge_object)) %in% cluster_id_tumor_micro)]
+
+DefaultAssay(Seurat_merge_object) = "SCT"
+Genes_diff_Expressed <- 
+  FindMarkers(Seurat_merge_object, 
+            ident.1	= WhichCells(Seurat_merge_object, idents=cluster_id_tumor_micro), 
+            ident.2	 = WhichCells(Seurat_merge_object, idents= cluster_id_others),
+            logfc.threshold = 0.5, only.pos = TRUE, 
+            recorrect_umi=FALSE) %>% rownames()
+
+for (current_sample in samples_to_consider){
+  
+  current_seurat_obj <- subset(x = Seurat_merge_object, idents = c("0", "1"), 
+    subset = orig.ident == current_sample)
+  DefaultAssay(current_seurat_obj) = "SCT"
+  
+  slide_ligands <- ligands_omni[ligands_omni %in% rownames(current_seurat_obj)] 
+  
+  gex <- as.matrix(current_seurat_obj@assays$SCT@data)[slide_ligands,]
+  lig_coverage <- rowSums(gex>0)/ncol(gex)
+  slide_ligands <- names(lig_coverage[lig_coverage>=coverage_threshold])
+  
+  list_slide_ligands[[current_sample]] <- slide_ligands
+  
+}
+
+ligands_predictors <- 
+  names(which(table(unlist(list_slide_ligands)) == 8) )
+
+ligands_predictors_DE <- 
+  ligands_predictors[ligands_predictors %in% Genes_diff_Expressed]
+```
+
+## Running Misty {.tabset}
+
+We define the views. 
+
+```{r, warning=FALSE, message=FALSE}
+# Define assay for each view
+view.assays <- list(
+  "main" = "dorothea",
+  "juxta.ligands" = "SCT"# ,
+  # "para.ligands" = "SCT"
+)
+
+# Define features for each view
+view.features <- list(
+  "main" = TF_to_predict,
+  "juxta.ligands" = ligands_predictors_DE # , 
+  # "para.ligands" = slide_ligands
+)
+
+# Define spatial context for each view
+view.types <- list(
+  "main" = "intra",
+  "juxta.ligands" = "juxta"  # ,
+#   "para.ligands" = "para"
+)
+
+# Define additional parameters (l in the case of paraview)
+view.params <- list(
+  "main" = NULL,
+  "juxta.ligands" = 2 # ,
+  # "para.ligands" = 10
+)
+```
+
+
+```{r, warning=FALSE, message=FALSE, results='asis'}
+seurat_list_objects <- readRDS(files_to_read_2)
+
+for (current_sample in samples_to_consider){
+  
+  cat( "### Sample :", current_sample ,"\n\n" )  
+  
+  current_seurat_obj <- seurat_list_objects[[current_sample]]
+  DefaultAssay(current_seurat_obj) <- "SCT"
+  
+  misty.out <- 
+    paste0(data_directory, analysis_name, 
+         "IntermediaryFiles/Misty_Results/results_TF_Ligands_DorotheaClusters/", 
+         current_sample)
+  
+  misty.results <- run_misty_seurat(
+    visium.slide = current_seurat_obj,
+    view.assays = view.assays,
+    view.features = view.features,
+    view.types = view.types,
+    view.params = view.params,
+    spot.ids = NULL, # Using the whole slide
+    out.alias = misty.out
+    ) %>%
+  collect_results()
+
+  plot_gainR2 <- misty.results %>%
+    plot_improvement_stats("gain.R2")
+  print(plot_gainR2)
+  
+  cat( "\n\n" ) 
+  
+  plot_gainRMSE <- misty.results %>%
+    plot_improvement_stats("gain.RMSE") 
+  print(plot_gainRMSE)
+  
+  cat( "\n\n" ) 
+  
+  print(misty.results$improvements %>%
+    filter(measure == "p.R2") %>%
+    arrange(value) %>% 
+    dplyr::select(-sample) %>% 
+    kbl() %>% kable_styling())
+  
+  cat( "\n\n" ) 
+  
+  plot_contributions <- misty.results %>% plot_view_contributions()
+  print(plot_contributions)
+  
+  cat( "\n\n" ) 
+  
+  plot_intra <- 
+    misty.results %>% plot_interaction_heatmap(view = "intra") 
+  
+  cat( "\n\n" ) 
+  print(plot_intra)
+  
+  cat( "\n\n" ) 
+  plot_juxta <- 
+    misty.results %>% plot_interaction_heatmap(view = "juxta.ligands_2") 
+  
+  print(plot_juxta)
+  
+  cat( "\n\n" ) 
+  
+}
+```
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```
+
+
+
+

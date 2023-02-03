@@ -1,0 +1,1001 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Misty aggregated results"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork,lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(dplyr)
+library(tibble)
+library(readr)
+library(stringr)
+library(cowplot)
+library(RColorBrewer)
+library(mistyR)
+library(purrr)
+library(kableExtra)
+library(pheatmap)
+
+
+data_directory <- 
+ params$data_directory
+analysis_name <- 
+  params$analysis_name
+
+result_folders <- "IntermediaryFiles/Misty_Results/results_TF_Ligands_DorotheaClusters/"
+input_files <- "IntermediaryFiles/"
+input_names <- "SeuratList_Clusters_Res05_Dorothea.rds"
+
+samples_to_consider <- c("SN048_A121573_Rep1", "SN048_A121573_Rep2",
+  "SN123_A595688_Rep1","SN124_A595688_Rep2", "SN123_A938797_Rep1_X", 
+  "SN124_A938797_Rep2", "SN84_A120838_Rep1", "SN84_A120838_Rep2") 
+
+results_misty_folders <- paste0(data_directory, analysis_name, result_folders)
+files_to_read_seurat <- paste0(data_directory, analysis_name,input_files,input_names)
+```
+
+# Results
+
+```{r, warning=FALSE, message=FALSE}
+misty_results <- 
+  collect_results(as.list(list.dirs(results_misty_folders, recursive = FALSE)))
+```
+
+```{r, warning=FALSE, message=FALSE}
+misty_results %>%
+  plot_improvement_stats("gain.R2") %>%
+  plot_improvement_stats("gain.RMSE")
+```
+
+```{r, warning=FALSE, message=FALSE}
+misty_results$improvements %>%
+  filter(measure == "p.R2") %>%
+  arrange(value) %>% 
+  dplyr::mutate(sample = str_replace(sample, results_misty_folders, ""))%>%
+  # dplyr::select(-sample) %>% 
+  kbl() %>% kable_styling()
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+misty_results %>% plot_view_contributions()
+```
+
+```{r, warning=FALSE,message=FALSE}
+misty_results$contributions.stats %>% 
+  kbl() %>% kable_styling()
+```
+
+```{r, warning=FALSE, message=FALSE}
+misty_results %>% plot_interaction_heatmap(view = "intra") 
+```
+
+```{r, warning=FALSE, message=FALSE}
+misty_results %>% plot_interaction_heatmap(view = "juxta.ligands_2", cutoff = 0.5) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot.data <- 
+  misty_results$importances.aggregated %>%
+  dplyr::filter(view == "juxta.ligands_2") %>% 
+  dplyr::select(Predictor, Target, Importance ) %>% 
+  tidyr::pivot_wider(names_from = Predictor,values_from = Importance ) %>% 
+  tibble::column_to_rownames(var = 'Target') %>% 
+  as.matrix() %>% t()
+
+palette <-c(rev(brewer.pal(n = 5, name ="RdBu")), "#000000")
+pheatmap(plot.data, treeheight_row=0,treeheight_col=0,  
+         color =palette, breaks = c(min(plot.data),-1,-0.5,0,0.5,1,max(plot.data)))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+misty_results$importances.aggregated %>%
+  dplyr::filter(view == "juxta.ligands_2") %>% 
+  dplyr::select(Predictor, Target, Importance) %>% 
+  dplyr::filter(Importance > 1) %>% 
+  dplyr::arrange(desc(Importance)) %>% 
+  kbl() %>% kable_styling()
+```
+
+## Some plots {.tabset}
+
+```{r, warning=FALSE, message=FALSE, results='asis', fig.height=25, fig.width=12}
+seurat_objects <- readRDS(files_to_read_seurat)
+ligands_TFs_toconsider <- 
+  misty_results$importances.aggregated  %>%
+  dplyr::filter(view == "juxta.ligands_2") %>%
+  dplyr::select(Predictor, Target, Importance) %>% 
+  dplyr::filter(Importance > 1)
+ligands_to_consider <- unique(ligands_TFs_toconsider$Predictor)
+TFs_to_consider <- unique(ligands_TFs_toconsider$Target)
+
+for (current_sample in samples_to_consider) {
+  
+  cat( "### Sample :", current_sample ,"\n\n" )  
+  
+  current_object <- seurat_objects[[current_sample]]
+  
+  DefaultAssay(current_object) <- "SCT"
+  print(SpatialFeaturePlot(current_object, features = ligands_to_consider, 
+    ncol = 2))
+    
+  cat("\n\n" )  
+  
+  DefaultAssay(current_object) <- "dorothea"
+  
+  print(SpatialFeaturePlot(current_object, features = TFs_to_consider[1:8], 
+    ncol = 2))
+  
+  cat("\n\n" )  
+  
+  print(SpatialFeaturePlot(current_object, features = TFs_to_consider[9:14], 
+    ncol = 2))
+  
+  cat("\n\n" )
+  
+  print(SpatialFeaturePlot(current_object, features = TFs_to_consider[15:20], 
+    ncol = 2))
+  
+  cat("\n\n" )  
+  
+}
+```
+
+## Publication plot
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A595688_Rep1"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("MMP1")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["MMP1",]), 
+              max(GetAssayData(current_object)["MMP1",]), length.out= 4),1)
+
+A595688_Rep1_MMP1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("MMP1 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) #  +
+      #  theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+      #        axis.title.y = element_text(face ="bold", size=14)) + 
+      # ylab("MMP1 Expression")
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("FOS")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["FOS",]), 
+              max(GetAssayData(current_object)["FOS",]), length.out= 4),1)
+
+
+A595688_Rep1_FOS <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("FOS TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+        # axis.title.y = element_text(face ="bold", size=14)) +
+        # theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))  + ylab("FOS activity")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN84_A120838_Rep2"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+
+
+current_gene <- c("THBS2")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["THBS2",]), 
+              max(GetAssayData(current_object)["THBS2",]), length.out= 4),1)
+
+A120838_Rep2_THBS2 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("THBS2 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+        # theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+        #      axis.title.y = element_text(face ="bold", size=14)) + 
+        # ylab("THBS2 Expression")
+
+current_gene <- c("CD36")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["CD36",]), 
+              max(GetAssayData(current_object)["CD36",]), length.out= 4),1)
+
+A120838_Rep2_CD36 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("CD36 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("STAT1")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["STAT1",]), 
+              max(GetAssayData(current_object)["STAT1",]), length.out= 4),1)
+
+A120838_Rep2_STAT1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("STAT1 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+        # axis.title.y = element_text(face ="bold", size=14)) +
+        # theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))  + ylab("FOS activity")
+```
+
+
+
+```{r, warning=FALSE, message=FALSE}
+A595688_Rep1_MMP1
+```
+
+```{r, warning=FALSE, message=FALSE}
+A595688_Rep1_FOS
+```
+
+```{r, warning=FALSE, message=FALSE}
+A120838_Rep2_THBS2
+```
+
+```{r, warning=FALSE, message=FALSE}
+A120838_Rep2_STAT1
+```
+
+
+## Supplementary plots
+
+
+## RNF43, JUN & TEAD4
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN84_A120838_Rep2"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("RNF43")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+A120838_Rep2_RNF43 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("RNF43 gene expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) #  +
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("JUN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A120838_Rep2_JUN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("Predicted JUN TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+current_gene <- c("TEAD4")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A120838_Rep2_TEAD4 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("TEAD4 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+A120838_Rep2_RNF43 + A120838_Rep2_JUN + A120838_Rep2_TEAD4
+```
+
+```{r, warning=FALSE, message=FALSE}
+A120838_Rep2_RNF43 + A120838_Rep2_JUN 
+```
+##  DCN, ETV4, MEIS1, and SPI1
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A595688_Rep1"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("DCN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+A595688_Rep1_DCN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("DCN gene expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) #  +
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("ETV4")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A595688_Rep1_ETV4 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene),  
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1, alpha = c(0,1)) + 
+      ggtitle("Predicted ETV4 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low  = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+current_gene <- c("MEIS1")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A595688_Rep1_MEIS1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene),  
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1, alpha = c(0,1)) + 
+      ggtitle("MEIS1 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low  = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+current_gene <- c("SPI1")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A595688_Rep1_SPI1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene),  
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1, alpha = c(0,1)) + 
+      ggtitle("SPI1 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low  = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+A595688_Rep1_DCN + A595688_Rep1_ETV4
+```
+
+
+## CXCL14 & MAF  
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN124_A938797_Rep2"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("RNF43")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+A938797_Rep2_RNF43 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("RNF43 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) #  +
+
+
+
+current_gene <- c("FZD2")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+A938797_Rep2_FZD2  <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("FZD2  Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) #  +
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("JUN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A938797_Rep2_JUN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("JUN TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+current_gene <- c("TEAD4")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A938797_Rep2_TEAD4 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("TEAD4 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN124_A938797_Rep2"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("CXCL14")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+A938797_Rep2_CXCL14 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("CXCL14 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) #  +
+
+
+
+current_gene <- c("CXCR4")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+A938797_Rep2_CXCR4  <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("CXCR4  Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) #  +
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("MAF")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A938797_Rep2_MAF <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("MAF TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+A938797_Rep2_CXCL14 + A938797_Rep2_CXCL12 + A938797_Rep2_MAF 
+```
+
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A595688_Rep1"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("PLAU")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+A595688_Rep1_PLAU <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("PLAU Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) #  +
+
+current_gene <- c("PLAUR")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+A595688_Rep1_PLAUR <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("PLAUR Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5))
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("BACH2")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A595688_Rep1_BACH2 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("BACH2 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+current_gene <- c("NFATC1")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A595688_Rep1_NFATC1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("NFATC1 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+A595688_Rep1_PLAU + A595688_Rep1_BACH2 + A595688_Rep1_NFATC1
+```
+
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("JUN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A595688_Rep1_JUN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("JUN TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+A595688_Rep1_MMP1 + A595688_Rep1_JUN
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A121573_Rep1"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("CXCL14")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+A121573_Rep1_CXCL14 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("CXCL14 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) #  +
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("MAF")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A121573_Rep1_MAF <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("MAF TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+A121573_Rep1_CXCL14 + A121573_Rep1_MAF
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A595688_Rep1"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("DCN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+A595688_Rep1_DCN  <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("DCN Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) #  +
+
+
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("EMP1")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+A595688_Rep1_EMP1  <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("EMP1 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("ETV4")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A595688_Rep1_ETV4 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("ETV4 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+current_gene <- c("MEIS1")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A595688_Rep1_MEIS1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("MEIS1 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+current_gene <- c("SPI1")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+
+A595688_Rep1_SPI1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("SPI1 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5))
+```
+
+```{r, warning=FALSE, message=FALSE}
+A595688_Rep1_DCN + A595688_Rep1_ETV4 + A595688_Rep1_MEIS1 + A595688_Rep1_SPI1 + 
+  plot_layout(widths = c(1, 1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN84_A120838_Rep2"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+
+
+current_gene <- c("LUM")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+A120838_Rep2_LUM <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("LUM Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("RUNX2")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)[current_gene,]), 
+              max(GetAssayData(current_object)[current_gene,]), length.out= 4),1)
+
+A120838_Rep2_RUNX2 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("RUNX2 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+A120838_Rep2_LUM + A120838_Rep2_RUNX2
+```
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

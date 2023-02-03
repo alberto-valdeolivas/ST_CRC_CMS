@@ -1,0 +1,94 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Exploring Liana Results"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(dplyr)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(tibble)
+library(readr)
+library(stringr)
+library(cowplot)
+library(RColorBrewer)
+library(liana)
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "IntermediaryFiles/MergeClustering/"
+input_names <- "lianaResults.rds"
+
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+results_directory <- paste0(data_directory, analysis_name, input_files)
+```
+
+Reading Seurat objects
+
+```{r warning=FALSE, message=FALSE}
+liana_results <- readRDS(files_to_read)
+```
+
+Plotting results for our top ligands. 
+
+```{r, warning=FALSE, message=FALSE, fig.height=10, fig.width=12}
+my_ligands <- c("CXCL14", "LUM", "THBS2", "RNF43","PLAU", "DCN", "MMP1")
+
+liana_significant_myligands <- liana_results %>% 
+  dplyr::filter(ligand %in% my_ligands) %>%
+  dplyr::filter(source %in% c("1", "0"), target %in% c("0", "1")) %>% 
+  dplyr::filter(aggregate_rank < 0.01) %>% 
+  dplyr::mutate(source = ifelse(source == "1", "TME", "Tumor")) %>%
+  dplyr::mutate(target = ifelse(target == "1", "TME", "Tumor"))
+
+
+liana_significant_myligands %>%
+  # top_n(25, desc(aggregate_rank)) %>%
+  liana_dotplot(source_groups = c("TME", "Tumor"),
+                target_groups = c("TME","Tumor"), show_complex = FALSE) +
+                # target_groups = unique(overlapping_liana_results_sc$target)) + 
+  theme(axis.text.y = element_text(size = 10, colour  = "black", face = "bold"),
+        axis.text.x = element_text(size = 10, colour  = "black", face = "bold"),
+        axis.title.x = element_text(size = 14),
+        strip.background = element_rect(fill = NA), 
+        strip.text = element_text(size = 12, colour = "black", face ="bold"),
+        legend.text = element_text(size = 12), legend.title = element_text(size=14)) + 
+  scale_color_gradientn(colours = RColorBrewer::brewer.pal(n=5, name = "Reds")) + 
+  scale_size_continuous(range = c(3, 7))
+```
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```
+

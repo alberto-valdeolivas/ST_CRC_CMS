@@ -1,0 +1,123 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: sc TF activities"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/pstore/data/biomics/_pre_portfolio/_platform_evaluation/SpatialTranscriptomics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning=FALSE, message=FALSE}
+# library(dplyr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(patchwork, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+library(Seurat, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(dorothea, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+library(tibble, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(readr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(stringr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(ggplot2, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(cowplot, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(RColorBrewer, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(mistyR, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_folder <- "Cell2Location/inputs/scRNAseq-ref/raw"
+
+files_to_read <- paste0(data_directory, analysis_name,input_folder)
+```
+
+Reading Seurat objects
+
+```{r warning=FALSE, message=FALSE}
+expression_matrix <- Read10X(data.dir = files_to_read)
+seurat_object <- 
+  CreateSeuratObject(counts = expression_matrix, min.cells = 10, min.features = 200)
+metedata_df <- read_tsv(paste0(files_to_read, "/metadata.tsv")) %>% 
+  tibble::column_to_rownames(var="CELL")
+seurat_object <- AddMetaData(seurat_object, metedata_df)
+seurat_object <- SCTransform(seurat_object, assay = "RNA", verbose = FALSE)
+```
+
+According to Lee's publication, we select patients with a CMS2 phenotype. 
+
+```{r, warning=FALSE, message=FALSE}
+CMS2_patients <- c("SMC22-T", "SMC18-T", "SMC21-T", "SMC09-T", 
+                   "SMC23-T", "SMC25-T", "SMC11-T", "SMC07-T")
+seurat_object_CMS2 <- subset(x=seurat_object, idents = CMS2_patients, 
+  subset = Cell_subtype != "Unknown")
+Idents(seurat_object_CMS2) <- seurat_object_CMS2$Cell_subtype
+seurat_object_CMS2 <- subset(seurat_object_CMS2)
+```
+
+We run dorothea with the same parameters as in the ST data.
+
+```{r, warning=FALSE, message=FALSE}
+dorothea_regulon <- 
+        get(data("dorothea_hs", package = "dorothea")) 
+
+confidence_levels<- c("A","B","C")
+regulon_filtered <- dorothea_regulon %>%
+      dplyr::filter(confidence %in% confidence_levels)
+
+seurat_object_CMS2 <- 
+  run_viper(seurat_object_CMS2, regulon_filtered, assay_key = "SCT", 
+  options = list(method = "scale", minsize = 4, eset.filter = FALSE, 
+    cores = 1, verbose = FALSE))
+```
+
+We load Misty results to get the TF of interest
+
+```{r, warning=FALSE, message=FALSE}
+results_misty_folders <- paste0(data_directory, analysis_name,
+  "IntermediaryFiles/Misty_Results/results_TF_Ligands_DorotheaClusters/")
+
+misty_results <- 
+  collect_results(as.list(list.dirs(results_misty_folders, recursive = FALSE)))
+
+TFs_toconsider <-
+  misty_results$importances.aggregated[["juxta.ligands_2"]] %>%
+  tidyr::pivot_longer(!Predictor, names_to="TFs", values_to  = "importance") %>%
+  dplyr::filter(importance > 1) %>% 
+  dplyr::pull(TFs) %>% unique()
+```
+
+We plot the average TF activity per cell type
+
+```{r, warning=FALSE, message=FALSE, fig.width=8, fig.height=6}
+DotPlot(seurat_object_CMS2, assay = "dorothea", 
+        features = TFs_toconsider, dot.scale = 5, 
+        col.min = 0) + 
+  RotatedAxis() +  labs(y= "Cell Types", x = "TFs") +
+  scale_color_gradient(low = "white", high = "darkred") + 
+  guides(color = guide_colorbar(title = "Average TF activity"), 
+         size = guide_legend("Percent Active")) 
+```
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

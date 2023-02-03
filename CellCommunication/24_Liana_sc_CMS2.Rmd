@@ -1,0 +1,235 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Ligand-Receptor Interactions"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/pstore/data/biomics/_pre_portfolio/_platform_evaluation/SpatialTranscriptomics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning=FALSE, message=FALSE}
+library(dplyr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(patchwork, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+library(Seurat, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(tibble, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(readr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(stringr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(ggplot2, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(cowplot, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(RColorBrewer, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(liana,  lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(ggsankey, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_folder <- "Cell2Location/inputs/scRNAseq-ref/raw"
+input_files <-  "IntermediaryFiles/MergeClustering/lianaResults.rds"
+output_files <- "IntermediaryFiles/sc_data_analysis/Liana_results/CMS2_patients.rds"
+
+files_to_read <- paste0(data_directory, analysis_name,input_folder)
+files_to_read_2 <- paste0(data_directory, analysis_name,input_files)
+files_to_write <- paste0(data_directory, analysis_name, output_files)
+```
+
+Reading Seurat objects
+
+```{r warning=FALSE, message=FALSE}
+expression_matrix <- Read10X(data.dir = files_to_read)
+seurat_object <- 
+  CreateSeuratObject(counts = expression_matrix, min.cells = 10, min.features = 200)
+metedata_df <- read_tsv(paste0(files_to_read, "/metadata.tsv")) %>% 
+  tibble::column_to_rownames(var="CELL")
+seurat_object <- AddMetaData(seurat_object, metedata_df)
+```
+
+According to Lee's publication, we select patients with a CMS2 phenotype. 
+
+```{r, warning=FALSE, message=FALSE}
+CMS2_patients <- c("SMC22-T", "SMC18-T", "SMC21-T", "SMC09-T", 
+                   "SMC23-T", "SMC25-T", "SMC11-T", "SMC07-T")
+seurat_object_CMS2 <- subset(x=seurat_object, idents = CMS2_patients, 
+  subset = Cell_subtype != "Unknown")
+Idents(seurat_object_CMS2) <- seurat_object_CMS2$Cell_subtype
+```
+
+Number of cells of the different types per patient:
+
+```{r, warning=FALSE, message=TRUE}
+message(paste0("Total number of Cells of the different types:","\n\n"))
+table(seurat_object_CMS2@meta.data$Cell_subtype)
+for (current_patient in CMS2_patients){
+
+  message(paste0("Cells per type for Patient: ", current_patient ,"\n\n"))
+  print(table(dplyr::filter(seurat_object_CMS2@meta.data, orig.ident == current_patient) %>%
+          dplyr::pull(Cell_subtype)))
+}
+```
+
+
+Running LIANA 
+
+```{r, warning=FALSE, message=FALSE, eval=FALSE}
+liana_results <- liana_wrap(seurat_object_CMS2) %>% 
+  liana_aggregate()
+saveRDS(liana_results, file = files_to_write)
+```
+
+Plotting general results to show that sc-st are making sense
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE}
+liana_results_sc <- readRDS(files_to_write)
+liana_results_sp <- readRDS(files_to_read_2)
+main_components <- c("SPP1+", "Stromal 1", "Stromal 2", "Stromal 3", "CMS2", "Myofibroblasts")
+my_ligands <- c("CXCL14", "LUM", "THBS2", "RNF43","PLAU", "DCN", "MMP1")
+
+
+liana_sp_significant_myligands <- liana_results_sp %>% 
+  dplyr::filter(ligand %in% my_ligands) %>%
+  dplyr::filter(source %in% c("1", "0"), target %in% c("1")) %>% 
+  dplyr::filter(aggregate_rank < 0.01) %>% 
+  dplyr::select(ligand, receptor) %>%
+  dplyr::distinct() %>% 
+  dplyr::mutate(Spatial_Int = "Yes")
+
+overlapping_liana_results_sc_mainComponents <- liana_results_sc %>%
+  dplyr::filter(source %in% main_components, target %in% main_components) %>%
+  dplyr::full_join(liana_sp_significant_myligands) %>%
+  dplyr::mutate(Spatial_Int = ifelse(is.na(Spatial_Int), "No", Spatial_Int))
+  
+mean_sp_int <- 
+  dplyr::filter(overlapping_liana_results_sc_mainComponents, Spatial_Int == "Yes") %>% 
+  dplyr::pull(mean_rank) %>% mean(na.rm = TRUE)
+
+ggplot(overlapping_liana_results_sc_mainComponents) + 
+  geom_density(data = liana_results_sc, aes(x = mean_rank ), 
+               fill = "#1F78B4", color = "#1F78B4", alpha = 0.75) + 
+  geom_vline(xintercept=mean_sp_int, colour= "#E31A1C", size=2, linetype="dashed") + 
+  theme_half_open() + labs(x = "Mean LIANA's ranking") + 
+  theme(axis.title.y=element_blank(),
+        axis.text =element_blank(),
+        axis.ticks=element_blank(), axis.line.y =  element_blank())
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+overlapping_liana_results_sc <- liana_results_sc %>%
+  dplyr::filter(aggregate_rank < 0.01) %>% 
+  dplyr::filter(source != "Unknown" & target != "Unknown") %>% 
+  dplyr::inner_join(liana_sp_significant_myligands) 
+
+df_sankey <- overlapping_liana_results_sc %>% 
+  dplyr::select(source, target) %>% 
+  make_long(source, target) 
+
+ggplot(df_sankey, aes(x = x, next_x = next_x, node = node, 
+    next_node = next_node, label = node, fill=factor(node))) +
+    geom_sankey(flow.alpha = 0.8,
+              node.color = "black") +
+    geom_sankey_label(size = 3, color = "white", fill = "black") +
+    scale_fill_viridis_d(option = "A", alpha = .8)   +
+    theme_sankey(base_size = 22) +
+    labs(x = NULL) +
+    theme(legend.position = "none") #  + 
+    # ggtitle("Top Ligand-Receptor Interactions") # + 
+    # scale_x_discrete(labels  = labelsplot)
+```
+
+
+Plotting the detailed information
+
+```{r, warning=FALSE, message=FALSE}
+myeloid_target <- c("SPP1+","Pro-inflammatory", "Proliferating", "cDC")
+
+plot_myeloid_target <- overlapping_liana_results_sc %>%
+  # top_n(25, desc(aggregate_rank)) %>%
+  liana_dotplot(source_groups = unique(overlapping_liana_results_sc$source),
+                target_groups = myeloid_target) +
+                # target_groups = unique(overlapping_liana_results_sc$target)) + 
+  theme(axis.text.y = element_text(size = 10, colour  = "black", face = "bold"),
+        axis.text.x = element_text(size = 10, colour  = "black", face = "bold"),
+        axis.title.x = element_text(size = 14),
+        strip.background = element_rect(fill = NA), 
+        strip.text = element_text(size = 8, colour = "black", face ="bold"),
+        legend.text = element_text(size = 12), legend.title = element_text(size=14)) + 
+  scale_color_gradientn(colours = RColorBrewer::brewer.pal(n=5, name = "Reds")) + 
+  scale_size_continuous(range = c(2, 6))
+```
+
+
+```{r, warning=FALSE, message=FALSE, fig.width=8, fig.height=10}
+plot_myeloid_target
+```
+
+```{r, warning=FALSE, message=FALSE}
+stromal2_target <- c("Stalk-like ECs","Tip-like ECs", "Lymphatic ECs", "Smooth muscle cells", "Proliferative ECs", "Pericytes", "Enteric glial cells")
+
+plot_stromal2_target <- overlapping_liana_results_sc %>%
+  # top_n(25, desc(aggregate_rank)) %>%
+  liana_dotplot(source_groups = unique(overlapping_liana_results_sc$source),
+                target_groups = stromal2_target) +
+                # target_groups = unique(overlapping_liana_results_sc$target)) + 
+  theme(axis.text.y = element_text(size = 10, colour  = "black", face = "bold"),
+        axis.text.x = element_text(size = 10, colour  = "black", face = "bold"),
+        axis.title.x = element_text(size = 14),
+        strip.background = element_rect(fill = NA), 
+        strip.text = element_text(size = 10, colour = "black", face ="bold"),
+        legend.text = element_text(size = 12), legend.title = element_text(size=14)) + 
+  scale_color_gradientn(colours = RColorBrewer::brewer.pal(n=5, name = "Reds")) + 
+  scale_size_continuous(range = c(2, 6))
+```
+
+```{r, warning=FALSE, message=FALSE, fig.width=8, fig.height=10}
+plot_stromal2_target
+```
+
+```{r, warning=FALSE, message=FALSE}
+stromal1_target <- c("Myofibroblasts","Stromal 1", "Stromal 2", "Stromal 3")
+
+plot_stromal1_target <- overlapping_liana_results_sc %>%
+  # top_n(25, desc(aggregate_rank)) %>%
+  liana_dotplot(source_groups =  unique(overlapping_liana_results_sc$source),
+                target_groups = stromal1_target) +
+                # target_groups = unique(overlapping_liana_results_sc$target)) + 
+  theme(axis.text.y = element_text(size = 10, colour  = "black", face = "bold", family = "arial"),
+        axis.text.x = element_text(size = 10, colour  = "black", face = "bold", family = "arial"),
+        axis.title.x = element_text(size = 14, family = "arial"),
+        strip.background = element_rect(fill = NA), 
+        strip.text = element_text(size = 10, colour = "black", face ="bold", family = "arial"),
+        legend.text = element_text(size = 12), legend.title = element_text(size=14, family = "arial")) + 
+  scale_color_gradientn(colours = RColorBrewer::brewer.pal(n=5, name = "Reds")) + 
+  scale_size_continuous(range = c(2, 6))
+```
+
+```{r, warning=FALSE, message=FALSE, fig.width=8, fig.height=10}
+plot_stromal1_target
+```
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```
+

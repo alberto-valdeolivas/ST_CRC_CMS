@@ -20,6 +20,7 @@ and it is organized as follows:
 * Inter-patient heterogeneity in CMS2 tumors: 
 * Intra-patient heterogeneity in CMS2 tumors: 
 * Cell-Communication events:
+* CancerSEA module Scores: 
 * Additional analysis in the External ST CRC Dataset:
 * Figure arrangement:
 * Wrapper Functions:

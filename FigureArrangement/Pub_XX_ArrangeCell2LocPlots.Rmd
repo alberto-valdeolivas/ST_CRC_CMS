@@ -1,0 +1,1639 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Quality Control: Global Metrics"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Plot Arrangement of Cell2Location results
+
+# Getting Ready
+
+We first load the libraries and set the paths to the raw data. 
+
+```{r, message=FALSE, warning=FALSE}
+# library(patchwork, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+## We need to load a previous version of spatstat to make Seurat run. Related
+## to the following issue https://github.com/satijalab/seurat/issues/4226
+# library(spatstat, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(dplyr)
+library(readr)
+library(stringr)
+library(RColorBrewer)
+library(cowplot)
+
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "IntermediaryFiles/"
+input_names <- "SeuratList_Clusters_Res05.rds"
+
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+current_sample <- "SN124_A938797_Rep2"
+```
+
+
+We Load Cell2Location results 
+
+```{r, warning=FALSE, message=FALSE}
+filename_results_C2L <- 
+  "Cell2Location/results/LocationModelLinearDependentWMultiExperiment_14experiments_36clusters_20654locations_4188genes/W_cell_density_q05.csv"
+
+
+results_C2L <- read_csv(filename_results_C2L) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern = "Count_")) %>%
+  dplyr::mutate(spot_id = str_replace(.$spot_id, pattern = "SN123_A938797_Rep1_" ,
+                                      replacement = "SN123_A938797_Rep1_X_")) 
+
+
+
+colnames(results_C2L) <-
+  str_replace(colnames(results_C2L), pattern = "q05_spot_factors", replacement = "")
+
+results_C2L <- results_C2L %>% 
+  dplyr::mutate(sample = str_extract(.$spot_id, pattern =".*Rep[1-2]")) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern =".*Rep[1-2]_")) 
+```
+
+We load Seurat objects
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS("IntermediaryFiles/SeuratList_Clusters_Res05.rds")
+```
+
+```{r, warning=FALSE, message=FALSE}
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+seurat <- seurat_objects[[current_sample]]
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+We generate the plots
+
+```{r, warning=FALSE, message=FALSE}
+cell_types_toplot <- 
+  c("Mature Enterocytes type 1",
+    "Stem-like/TA", 
+    "CD4+ T cells", "CD8+ T cells",
+    "Myofibroblasts")   
+  
+list_plots <- list()
+
+for (i in seq_along(cell_types_toplot)){
+  current_cell_type <- cell_types_toplot[i]
+  breaks_vec <- 
+    round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+  current_plot <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"), 
+              plot.title = element_text(hjust = 0.5))
+
+  list_plots[[i]] <- current_plot
+  
+}
+
+names(list_plots)  <- cell_types_toplot
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=600, fig.height=12, fig.width=14}
+cowplot::plot_grid(plotlist= list_plots, 
+          ncol = 5, nrow = 1)
+
+# list_plots[[3]]
+
+# ggsave(filename = "/pstore/home/valdeola/Figure1_CD4+_Tcells.tiff", 
+#       device='tiff', dpi=300, plot = list_plots[[3]], units = "px",
+#       width = 1521,   height = 1103)
+#dev.off()
+
+
+# ggsave(filename = "/pstore/home/valdeola/Figure1_CD8+_Tcells.tiff", 
+#       device='tiff', dpi=300, plot = list_plots[[4]], units = "px",
+#       width = 1521, height = 1103)
+# insert ggplot code
+# dev.off()
+```
+
+We generate the plots with the other cell types
+
+```{r, warning=FALSE, message=FALSE}
+cell_types_toplot <- 
+  c("Goblet cells", "IgA+ Plasma", "IgG+ Plasma", 
+    "Regulatory T cells", "T follicular helper cells", "T helper 17 cells", 
+    "NK cells", "Stromal 1","Stromal 2")   
+  
+list_plots <- list()
+
+for (i in seq_along(cell_types_toplot)){
+  current_cell_type <- cell_types_toplot[i]
+  breaks_vec <- 
+    round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+  current_plot <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+  list_plots[[i]] <- current_plot
+  
+}
+
+names(list_plots)  <- cell_types_toplot
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=600, fig.height=12, fig.width=14}
+cowplot::plot_grid(plotlist= list_plots, 
+          ncol = 3, nrow = 3)
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type  <- "Stromal 3"
+
+breaks_vec <- 
+    round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+
+current_plot <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"), 
+              plot.title = element_text(hjust = 0.5))
+```
+
+
+
+## Supplementary plots 
+
+### Sample SN123_A595688_Rep1
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A595688_Rep1"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "Myofibroblasts"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_Myofibroblast_A595688_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "Stromal 2"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_Stromal2_A595688_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "Stromal 3"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_Stromal3_A595688_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_Myofibroblast_A595688_Rep1 + plot_Stromal2_A595688_Rep1 + 
+plot_Stromal3_A595688_Rep1 + 
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+
+### Sample SN123_A798015_Rep1
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A798015_Rep1"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_A798015_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_A798015_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS3_A798015_Rep1 + plot_CMS1_A798015_Rep1  
+```
+
+## Supplementary Figures for all samples: selected cell types
+
+### Sample S1_Cec A551763
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A551763_Rep1"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CD8+ T cells"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CD8Tcells_A551763_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CD19+CD20+ B"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CD19CD20B_A551763_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "Myofibroblasts"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_Myofibroblasts_A551763_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CD8Tcells_A551763_Rep1 + plot_CD19CD20B_A551763_Rep1 + 
+plot_Myofibroblasts_A551763_Rep1 
+  plot_layout(widths = c(1,1,1), ncol = 3, nrow = 1)
+```
+
+
+### Sample S2_Col_R A595688
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A595688_Rep1"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "Goblet cells"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_Goblet_A595688_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "SPP1+"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_SPP1_A595688_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "Smooth muscle cells"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_Myofibroblasts_A595688_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_Goblet_A595688_Rep1 + plot_SPP1_A595688_Rep1 + 
+plot_Myofibroblasts_A595688_Rep1 
+  plot_layout(widths = c(1,1,1), ncol = 3, nrow = 1)
+```
+
+
+### Sample S3_Col_R A416371
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A416371_Rep1"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "NK cells"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_NKcells_A416371_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "SPP1+"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_SPP1_A416371_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "T follicular helper cells"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_Tfollhelper_A416371_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_NKcells_A416371_Rep1 + plot_SPP1_A416371_Rep1 + 
+plot_Tfollhelper_A416371_Rep1 
+  plot_layout(widths = c(1,1,1), ncol = 3, nrow = 1)
+```
+
+### Sample S4_Col_Sig A120838
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN84_A120838_Rep2"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "Myofibroblasts"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_Myofibroblasts_A120838_Rep2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "SPP1+"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_SPP1_A120838_Rep2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "Pericytes"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_Pericytes_A120838_Rep2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_Myofibroblasts_A120838_Rep2 + plot_SPP1_A120838_Rep2 + 
+plot_Pericytes_A120838_Rep2 
+  plot_layout(widths = c(1,1,1), ncol = 3, nrow = 1)
+```
+
+
+### Sample S5_Rec A121573
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A121573_Rep1"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "Mature Enterocytes type 2"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_Enterocytes2_A121573_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "IgA+ Plasma"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_IgA_A121573_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "Pericytes"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_Pericytes_A120838_Rep2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_Myofibroblasts_A120838_Rep2 + plot_SPP1_A120838_Rep2 + 
+plot_Pericytes_A120838_Rep2 
+  plot_layout(widths = c(1,1,1), ncol = 3, nrow = 1)
+```
+
+
+
+## Supplementary Figures all CMS in all samples 
+
+
+### Sample S1_Cec A551763
+
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A551763_Rep1"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_A551763_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_A551763_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_A551763_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_A551763_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_A551763_Rep1 + plot_CMS2_A551763_Rep1 + 
+plot_CMS3_A551763_Rep1 + plot_CMS4_A551763_Rep1
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+
+### Sample S2_Col_R A595688
+
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A595688_Rep1"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_A595688_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_A595688_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_A595688_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_A595688_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_A595688_Rep1 + plot_CMS2_A595688_Rep1 + 
+plot_CMS3_A595688_Rep1 + plot_CMS4_A595688_Rep1
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+
+### Sample S3_Col_R A416371
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A416371_Rep1"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_A416371_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_A416371_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_A416371_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_A416371_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_A416371_Rep1 + plot_CMS2_A416371_Rep1 + 
+plot_CMS3_A416371_Rep1 + plot_CMS4_A416371_Rep1
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+
+### Sample S4_Col_Sig A120838 
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN84_A120838_Rep2"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_A120838_Rep2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_A120838_Rep2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_A120838_Rep2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_A120838_Rep2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_A120838_Rep2 + plot_CMS2_A120838_Rep2 + 
+plot_CMS3_A120838_Rep2 + plot_CMS4_A120838_Rep2
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+### Sample S5_Rec A121573 
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A121573_Rep1"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_A121573_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_A121573_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_A121573_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_A121573_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_A121573_Rep1 + plot_CMS2_A121573_Rep1 + 
+plot_CMS3_A121573_Rep1 + plot_CMS4_A121573_Rep1
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+
+### Sample S6_Rec A938797 
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN124_A938797_Rep2"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_A938797_Rep2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_A938797_Rep2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_A938797_Rep2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_A938797_Rep2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_A938797_Rep2 + plot_CMS2_A938797_Rep2 + 
+plot_CMS3_A938797_Rep2 + plot_CMS4_A938797_Rep2
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+### Sample S7_Rec/Sig A798015
+
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A798015_Rep1"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_A798015_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_A798015_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_A798015_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_A798015_Rep1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_A798015_Rep1 + plot_CMS2_A798015_Rep1 + 
+plot_CMS3_A798015_Rep1 + plot_CMS4_A798015_Rep1
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+  
+```  
+
+# Conclusion 
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```
+
+

@@ -1,0 +1,865 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Quality Control: Global Metrics"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Plot Arrangement of Cell2Location results
+
+# Getting Ready
+
+We first load the libraries and set the paths to the raw data. 
+
+```{r, message=FALSE, warning=FALSE}
+# library(patchwork, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+## We need to load a previous version of spatstat to make Seurat run. Related
+## to the following issue https://github.com/satijalab/seurat/issues/4226
+# library(spatstat, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+# library(dplyr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(tibble)
+library(readr)
+library(stringr)
+library(cowplot)
+library(RColorBrewer)
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "IntermediaryFiles/"
+input_names <- "SeuratList_Clusters_Res05.rds"
+
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+```
+
+
+We Load Cell2Location results 
+
+```{r, warning=FALSE, message=FALSE}
+filename_results_C2L <- 
+  "Cell2Location/results/LocationModelLinearDependentWMultiExperiment_14experiments_36clusters_20654locations_4188genes/W_cell_density_q05.csv"
+
+
+results_C2L <- read_csv(filename_results_C2L) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern = "Count_")) %>%
+  dplyr::mutate(spot_id = str_replace(.$spot_id, pattern = "SN123_A938797_Rep1_" ,
+                                      replacement = "SN123_A938797_Rep1_X_")) 
+
+
+
+colnames(results_C2L) <-
+  str_replace(colnames(results_C2L), pattern = "q05_spot_factors", replacement = "")
+
+results_C2L <- results_C2L %>% 
+  dplyr::mutate(sample = str_extract(.$spot_id, pattern =".*Rep[1-2]")) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern =".*Rep[1-2]_")) 
+```
+
+We load Seurat objects
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read)
+```
+
+We generate the plots with the results of the cell2location for the different 
+samples
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A121573_Rep1"
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+seurat <- seurat_objects[[current_sample]]
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+We generate the plots for this sample
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- c("CMS2")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+A121573_Rep1_CMS2 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- c("CMS3")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+A121573_Rep1_CMS3 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A416371_Rep1"
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+seurat <- seurat_objects[[current_sample]]
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+We generate the plots for this sample
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- c("CMS1")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+A416371_Rep1_CMS1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- c("CMS2")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+A416371_Rep1_CMS2 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10),
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- c("CD8+ T cells")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+A416371_Rep1_CD8_T_cells <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10),
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- c("CD19+CD20+ B")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+A416371_Rep1_CD19_20_B_cells <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10),
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- c("SPP1+")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+A416371_Rep1_SPP1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+
+```
+
+```{r}
+A416371_Rep1_CMS1 + A416371_Rep1_CMS2 + A416371_Rep1_CD19_20_B_cells + A416371_Rep1_CD8_T_cells + plot_layout(nrow = 1)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A595688_Rep1"
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+seurat <- seurat_objects[[current_sample]]
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+We generate the plots for this sample
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- c("CMS2")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+A595688_Rep1_CMS2 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- c("CMS4")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 4),1)
+A595688_Rep1_CMS4 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- c("Myofibroblasts")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 4),1)
+A595688_Rep1_Myofibroblasts <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- c("Stromal 1")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 4),1)
+A595688_Rep1_Stromal_1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- c("Stromal 2")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 4),1)
+A595688_Rep1_Stromal_2 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- c("Stromal 3")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 4),1)
+A595688_Rep1_Stromal_3 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- c("SPP1+")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 4),1)
+A595688_Rep1_SPP1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+```
+
+We generate the plots with the pathway  activity
+
+```{r, warning=FALSE, message=FALSE}
+input_names <- "SeuratList_Clusters_Res05_Progeny.rds"
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+seurat_objects <- readRDS(files_to_read)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A595688_Rep1"
+seurat <- seurat_objects[[current_sample]]
+
+current_pathway <- c("WNT")
+breaks_vec <- 
+    round(seq(min(GetAssayData(seurat)["WNT",]), max(GetAssayData(seurat)["WNT",]), length.out= 4),1)
+A595688_Rep1_WNT <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_pathway), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("WNT pathway activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_pathway <- c("VEGF")
+breaks_vec <- 
+    round(seq(min(GetAssayData(seurat)["VEGF",]), max(GetAssayData(seurat)["VEGF",]), length.out= 4),1)
+A595688_Rep1_VEGF <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_pathway), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("VEGF pathway activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A416371_Rep1"
+seurat <- seurat_objects[[current_sample]]
+current_pathway <- c("JAK-STAT")
+breaks_vec <- 
+    round(seq(min(GetAssayData(seurat)["JAK-STAT",]), max(GetAssayData(seurat)["JAK-STAT",]), length.out= 4),1)
+A416371_Rep1_JAKSTAT <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_pathway), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("JAK-STAT pathway activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white",
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r}
+A416371_Rep1_CMS1 + A416371_Rep1_CMS2 + A416371_Rep1_CD19_20_B_cells + A416371_Rep1_CD8_T_cells +  A416371_Rep1_JAKSTAT +  plot_layout(nrow = 1)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN124_A938797_Rep2"
+seurat <- seurat_objects[[current_sample]]
+DefaultAssay(seurat) <- "SCT"
+current_pathway <- c("YAP1")
+breaks_vec <- 
+    round(seq(min(GetAssayData(seurat)["YAP1",]), max(GetAssayData(seurat)["YAP1",]), length.out= 4),1)
+A938797_Rep2_YAP1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_pathway), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("YAP1 expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_pathway <- c("DVL3")
+breaks_vec <- 
+    round(seq(min(GetAssayData(seurat)["DVL3",]), max(GetAssayData(seurat)["DVL3",]), length.out= 4),1)
+A938797_Rep2_DVL3 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_pathway), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("DVL3 expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(seurat) <- "progeny"
+current_pathway <- c("WNT")
+breaks_vec <- 
+    round(seq(min(GetAssayData(seurat)["WNT",]), max(GetAssayData(seurat)["WNT",]), length.out= 4),1)
+A938797_Rep2_WNT <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_pathway), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("WNT pathway activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A595688_Rep1"
+seurat <- seurat_objects[[current_sample]]
+DefaultAssay(seurat) <- "SCT"
+current_pathway <- c("TLR2")
+breaks_vec <- 
+    round(seq(min(GetAssayData(seurat)["TLR2",]), max(GetAssayData(seurat)["TLR2",]), length.out= 4),1)
+A595688_Rep1_TLR2 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_pathway), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("TLR2 expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(seurat) <- "progeny"
+current_pathway <- c("EGFR")
+breaks_vec <- 
+    round(seq(min(GetAssayData(seurat)["EGFR",]), max(GetAssayData(seurat)["EGFR",]), length.out= 4),1)
+A595688_Rep1_EGFR <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_pathway), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2.25, stroke = 1) + 
+      ggtitle("EGFR pathway activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+We generate the plots with the TF activity
+
+```{r, warning=FALSE, message=FALSE}
+input_names <- "SeuratList_Clusters_Res05_Dorothea.rds"
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+seurat_objects <- readRDS(files_to_read)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A121573_Rep1"
+seurat <- seurat_objects[[current_sample]]
+current_TF <- c("MYC")
+breaks_vec <- 
+    round(seq(min(GetAssayData(seurat)["MYC",]), max(GetAssayData(seurat)["MYC",]), length.out= 6),1)
+A121573_Rep1_MYC <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_TF), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("MYC TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white",
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_TF <- c("E2F4")
+breaks_vec <- 
+    round(seq(min(GetAssayData(seurat)["E2F4",]), max(GetAssayData(seurat)["E2F4",]), length.out= 6),1)
+
+A121573_Rep1_E2F4 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_TF), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("E2F4 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white",
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+
+current_TF <- c("NR2C2")
+breaks_vec <- 
+    round(seq(min(GetAssayData(seurat)["NR2C2",]), max(GetAssayData(seurat)["NR2C2",]), length.out= 6),1)
+
+A121573_Rep1_NR2C2 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_TF), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("NR2C2 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white",
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=600, fig.height=12, fig.width=14}
+list_plots_1 <- list(A416371_Rep1_CMS1, A416371_Rep1_CMS2, A121573_Rep1_CMS2,
+                A121573_Rep1_CMS3, A595688_Rep1_CMS2, A595688_Rep1_CMS4, 
+                A416371_Rep1_CD8_T_cells, A416371_Rep1_CD19_20_B_cells,
+                A416371_Rep1_SPP1)
+cowplot::plot_grid(plotlist= list_plots_1, 
+          ncol = 3, nrow = 3)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=600, fig.height=4, fig.width=14}
+list_plots_2 <- list(A416371_Rep1_JAKSTAT, A121573_Rep1_MYC, A595688_Rep1_WNT)
+cowplot::plot_grid(plotlist= list_plots_2, 
+          ncol = 3, nrow = 1)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=600, fig.height=8, fig.width=10}
+list_plots_3 <- list(A595688_Rep1_Myofibroblasts, A595688_Rep1_Stromal_1,
+                     A595688_Rep1_Stromal_2, A595688_Rep1_Stromal_3)
+cowplot::plot_grid(plotlist= list_plots_3, 
+          ncol = 2, nrow = 2, labels=c("A","B","C","D"))
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=600, fig.height=4, fig.width=14, eval=FALSE}
+list_plots_4 <- 
+  list(A595688_Rep1_CMS2, A595688_Rep1_Myofibroblasts ,A595688_Rep1_WNT,
+    A121573_Rep1_CMS2, A121573_Rep1_MYC)
+cowplot::plot_grid(plotlist= list_plots_4, 
+          ncol = 5, nrow = 1)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=600, fig.height=4, fig.width=14}
+list_plots_4 <- 
+  list(A595688_Rep1_CMS2, A595688_Rep1_WNT,  
+    A121573_Rep1_CMS2, A121573_Rep1_MYC, A121573_Rep1_E2F4)
+cowplot::plot_grid(plotlist= list_plots_4, 
+          ncol = 5, nrow = 1)
+```
+
+## Plots with number of reads 
+
+### Sample: A595688_Rep1
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN123_A595688_Rep1"
+seurat <- seurat_objects[[current_sample]]
+DefaultAssay(seurat) <- "SCT"
+
+
+
+A595688_Rep1_Counts <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = "nCount_Spatial", 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("# Transcripts per spot") + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_blank(),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))  
+
+        # guides(fill=guide_legend(title="# Transcripts"))
+A595688_Rep1_Counts
+```
+### Sample: A121573_Rep1
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A121573_Rep1"
+seurat <- seurat_objects[[current_sample]]
+DefaultAssay(seurat) <- "SCT"
+
+
+
+A121573_Rep1_Counts <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = "nCount_Spatial", 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("# Transcripts per spot") + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_blank(),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))  
+
+        # guides(fill=guide_legend(title="# Transcripts"))
+
+A121573_Rep1_Counts
+```
+### Sample: A416371_Rep1 
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "SN048_A416371_Rep1"
+results_C2L_sample <- results_C2L %>%
+  dplyr::filter(sample == current_sample)
+seurat <- seurat_objects[[current_sample]]
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+
+
+current_cell_type <- c("Stromal 1")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 4),1)
+
+A416371_Rep1_Stromal_1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10),
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- c("Stromal 2")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 4),1)
+A416371_Rep1_Stromal_2 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10),
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+current_cell_type <- c("Stromal 3")
+breaks_vec <- 
+    round(seq(0, max(dplyr::pull(seurat@meta.data,current_cell_type)), length.out= 4),1)
+A416371_Rep1_Stromal_3 <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = c(current_cell_type), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+      ggtitle(current_cell_type) + 
+      scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10),
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+
+
+A416371_Rep1_Counts <- 
+    Seurat::SpatialFeaturePlot(
+      object = seurat,
+      features = "nCount_Spatial", 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("# Transcripts per spot") + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_blank(),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))  
+
+        # guides(fill=guide_legend(title="# Transcripts"))
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=600, fig.height=8, fig.width=10}
+list_plots_3 <- list(A416371_Rep1_Counts, A416371_Rep1_Stromal_1,
+                     A416371_Rep1_Stromal_2, A416371_Rep1_Stromal_3)
+cowplot::plot_grid(plotlist= list_plots_3, 
+          ncol = 2, nrow = 2, labels=c("a","b","c","d"))
+```
+
+
+# Conclusion 
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```
+
+

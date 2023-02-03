@@ -1,0 +1,1165 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Misty aggregated results"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork,lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(dplyr)
+library(tibble)
+library(readr)
+library(stringr)
+library(cowplot)
+library(RColorBrewer)
+library(mistyR)
+library(purrr)
+library(kableExtra)
+library(pheatmap)
+
+
+data_directory <- 
+ params$data_directory
+analysis_name <- 
+  params$analysis_name
+
+
+result_folders <- "ST_LiverMetastases_pub/IntermediaryFiles/results_TF_Ligands_DorotheaClusters"
+input_files <- "ST_LiverMetastases_pub/IntermediaryFiles/"
+input_names <- "SeuratList_Clusters_Res05_Dorothea.rds"
+
+samples_to_consider <- c() 
+
+results_misty_folders <- paste0(data_directory, analysis_name, result_folders)
+files_to_read_seurat <- paste0(data_directory, analysis_name,input_files,input_names)
+```
+
+# Results
+
+We check the results for different combinations of our data. 
+
+```{r, warning=FALSE, message=FALSE}
+misty_folders_all <- as.list(list.dirs(results_misty_folders, recursive = FALSE))
+```
+
+## Large CRC tumors in the colon 
+
+```{r, warning=FALSE, message=FALSE}
+
+misty_folders_selected <- misty_folders_all[c(1,2,3)]
+
+misty_results <- collect_results(misty_folders_selected)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+plot.data <- 
+  misty_results$importances.aggregated %>%
+  dplyr::filter(view == "juxta.ligands_2") %>% 
+  dplyr::select(Predictor, Target, Importance ) %>% 
+  tidyr::pivot_wider(names_from = Predictor,values_from = Importance ) %>% 
+  tibble::column_to_rownames(var = 'Target') %>% 
+  as.matrix() %>% t()
+
+palette <-c(rev(brewer.pal(n = 5, name ="RdBu")), "#000000")
+pheatmap(plot.data, treeheight_row=0,treeheight_col=0,  
+         color =palette, breaks = c(min(plot.data),-1,-0.5,0,0.5,1,max(plot.data)))
+```
+
+
+## Non-treated CRC Tumors in the colon. 
+
+
+```{r, warning=FALSE, message=FALSE}
+
+misty_folders_selected <- misty_folders_all[c(1,2)]
+
+misty_results <- collect_results(misty_folders_selected)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+plot.data <- 
+  misty_results$importances.aggregated %>%
+  dplyr::filter(view == "juxta.ligands_2") %>% 
+  dplyr::select(Predictor, Target, Importance ) %>% 
+  tidyr::pivot_wider(names_from = Predictor,values_from = Importance ) %>% 
+  tibble::column_to_rownames(var = 'Target') %>% 
+  as.matrix() %>% t()
+
+palette <-c(rev(brewer.pal(n = 5, name ="RdBu")), "#000000")
+pheatmap(plot.data, treeheight_row=0,treeheight_col=0,  
+         color =palette, breaks = c(min(plot.data),-1,-0.5,0,0.5,1,max(plot.data)))
+```
+
+## CRC Tumors treated or untreated with large tumor areas. 
+
+
+```{r, warning=FALSE, message=FALSE}
+misty_folders_selected <- misty_folders_all[c(1,3)]
+
+misty_results <- collect_results(misty_folders_selected)
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+plot.data <- 
+  misty_results$importances.aggregated %>%
+  dplyr::filter(view == "juxta.ligands_2") %>% 
+  dplyr::select(Predictor, Target, Importance ) %>% 
+  tidyr::pivot_wider(names_from = Predictor,values_from = Importance ) %>% 
+  tibble::column_to_rownames(var = 'Target') %>% 
+  as.matrix() %>% t()
+
+palette <-c(rev(brewer.pal(n = 5, name ="RdBu")), "#000000")
+pheatmap(plot.data, treeheight_row=0,treeheight_col=0,  
+         color =palette, breaks = c(min(plot.data),-1,-0.5,0,0.5,1,max(plot.data)))
+```
+
+## All CRC metastatic tumors in the liver 
+
+```{r, warning=FALSE, message=FALSE}
+
+misty_folders_selected <- misty_folders_all[c(4,5,6,7)]
+
+misty_results <- collect_results(misty_folders_selected)
+
+```
+  
+```{r, warning=FALSE, message=FALSE, dpi=300}
+plot.data <- 
+  misty_results$importances.aggregated %>%
+  dplyr::filter(view == "juxta.ligands_2") %>% 
+  dplyr::select(Predictor, Target, Importance ) %>% 
+  tidyr::pivot_wider(names_from = Predictor,values_from = Importance ) %>% 
+  tibble::column_to_rownames(var = 'Target') %>% 
+  as.matrix() %>% t()
+
+palette <-c(rev(brewer.pal(n = 5, name ="RdBu")), "#000000")
+pheatmap(plot.data, treeheight_row=0,treeheight_col=0,  
+         color =palette, breaks = c(min(plot.data),-1,-0.5,0,0.5,1,max(plot.data)))
+```
+
+
+
+##  CRC metastatic tumors in the liver non treated patients
+
+```{r, warning=FALSE, message=FALSE}
+misty_folders_selected <- misty_folders_all[c(4,5)]
+
+misty_results <- collect_results(misty_folders_selected)
+
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+plot.data <- 
+  misty_results$importances.aggregated %>%
+  dplyr::filter(view == "juxta.ligands_2") %>% 
+  dplyr::select(Predictor, Target, Importance ) %>% 
+  tidyr::pivot_wider(names_from = Predictor,values_from = Importance ) %>% 
+  tibble::column_to_rownames(var = 'Target') %>% 
+  as.matrix() %>% t()
+
+palette <-c(rev(brewer.pal(n = 5, name ="RdBu")), "#000000")
+pheatmap(plot.data, treeheight_row=0,treeheight_col=0,  
+         color =palette, breaks = c(min(plot.data),-1,-0.5,0,0.5,1,max(plot.data)))
+```
+
+##  CRC metastatic tumors in the liver treated patients
+
+```{r, warning=FALSE, message=FALSE}
+misty_folders_selected <- misty_folders_all[c(6,7)]
+
+misty_results <- collect_results(misty_folders_selected)
+
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+plot.data <- 
+  misty_results$importances.aggregated %>%
+  dplyr::filter(view == "juxta.ligands_2") %>% 
+  dplyr::select(Predictor, Target, Importance ) %>% 
+  tidyr::pivot_wider(names_from = Predictor,values_from = Importance ) %>% 
+  tibble::column_to_rownames(var = 'Target') %>% 
+  as.matrix() %>% t()
+
+palette <-c(rev(brewer.pal(n = 5, name ="RdBu")), "#000000")
+pheatmap(plot.data, treeheight_row=0,treeheight_col=0,  
+         color =palette, breaks = c(min(plot.data),-1,-0.5,0,0.5,1,max(plot.data)))
+```
+
+##  CRC metastatic tumors in the liver large tumors
+
+```{r, warning=FALSE, message=FALSE}
+misty_folders_selected <- misty_folders_all[c(4,5,7)]
+
+misty_results <- collect_results(misty_folders_selected)
+
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300}
+plot.data <- 
+  misty_results$importances.aggregated %>%
+  dplyr::filter(view == "juxta.ligands_2") %>% 
+  dplyr::select(Predictor, Target, Importance ) %>% 
+  tidyr::pivot_wider(names_from = Predictor,values_from = Importance ) %>% 
+  tibble::column_to_rownames(var = 'Target') %>% 
+  as.matrix() %>% t()
+
+palette <-c(rev(brewer.pal(n = 5, name ="RdBu")), "#000000")
+pheatmap(plot.data, treeheight_row=0,treeheight_col=0,  
+         color =palette, breaks = c(min(plot.data),-1,-0.5,0,0.5,1,max(plot.data)))
+```
+
+## Publication plot
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read_seurat)
+```
+
+### ST-colon 1
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-colon1"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("RNF43")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["RNF43",]), 
+              max(GetAssayData(current_object)["RNF43",]), length.out= 4),1)
+
+ST_colon1_RNF43 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("RNF43 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("TEAD1")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["TEAD1",]), 
+              max(GetAssayData(current_object)["TEAD1",]), length.out= 4),1)
+
+
+ST_colon1_TEAD1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("TEAD1 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+current_gene <- c("JUN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["JUN",]), 
+              max(GetAssayData(current_object)["JUN",]), length.out= 4),1)
+
+
+ST_colon1_JUN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("JUN TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon1_RNF43
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon1_TEAD1
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon1_JUN
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("CXCL14")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["CXCL14",]), 
+              max(GetAssayData(current_object)["CXCL14",]), length.out= 4),1)
+
+ST_colon1_CXCL14 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("CXCL14 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("MAF")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["MAF",]), 
+              max(GetAssayData(current_object)["MAF",]), length.out= 4),1)
+
+
+ST_colon1_MAF <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("MAF TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon1_CXCL14
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon1_MAF
+```
+
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("DCN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["DCN",]), 
+              max(GetAssayData(current_object)["DCN",]), length.out= 4),1)
+
+ST_colon1_DCN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("DCN Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("ETV4")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["ETV4",]), 
+              max(GetAssayData(current_object)["ETV4",]), length.out= 4),1)
+
+
+ST_colon1_ETV4 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("ETV4 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r}
+ST_colon1_DCN
+```
+
+
+```{r}
+ST_colon1_ETV4
+```
+
+
+
+### ST-colon 2
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-colon2"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("RNF43")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["RNF43",]), 
+              max(GetAssayData(current_object)["RNF43",]), length.out= 4),1)
+
+ST_colon2_RNF43 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("RNF43 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("TEAD1")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["TEAD1",]), 
+              max(GetAssayData(current_object)["TEAD1",]), length.out= 4),1)
+
+
+ST_colon2_TEAD1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("TEAD1 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+current_gene <- c("JUN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["JUN",]), 
+              max(GetAssayData(current_object)["JUN",]), length.out= 4),1)
+
+
+ST_colon2_JUN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("JUN TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon2_RNF43
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon2_TEAD1
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon2_JUN
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("CXCL14")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["CXCL14",]), 
+              max(GetAssayData(current_object)["CXCL14",]), length.out= 4),1)
+
+ST_colon2_CXCL14 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("CXCL14 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("MAF")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["MAF",]), 
+              max(GetAssayData(current_object)["MAF",]), length.out= 4),1)
+
+
+ST_colon2_MAF <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("MAF TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon2_CXCL14
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon2_MAF
+```
+
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("DCN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["DCN",]), 
+              max(GetAssayData(current_object)["DCN",]), length.out= 4),1)
+
+ST_colon2_DCN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("DCN Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("ETV4")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["ETV4",]), 
+              max(GetAssayData(current_object)["ETV4",]), length.out= 4),1)
+
+
+ST_colon2_ETV4 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("ETV4 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r}
+ST_colon2_DCN
+```
+
+
+```{r}
+ST_colon2_ETV4
+```
+
+
+
+### ST-colon 4
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-colon4"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("RNF43")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["RNF43",]), 
+              max(GetAssayData(current_object)["RNF43",]), length.out= 4),1)
+
+ST_colon4_RNF43 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("RNF43 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("TEAD1")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["TEAD1",]), 
+              max(GetAssayData(current_object)["TEAD1",]), length.out= 4),1)
+
+
+ST_colon4_TEAD1 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("TEAD1 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+current_gene <- c("JUN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["JUN",]), 
+              max(GetAssayData(current_object)["JUN",]), length.out= 4),1)
+
+
+ST_colon4_JUN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("JUN TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon4_RNF43
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon4_TEAD1
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon4_JUN
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("CXCL14")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["CXCL14",]), 
+              max(GetAssayData(current_object)["CXCL14",]), length.out= 4),1)
+
+ST_colon4_CXCL14 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("CXCL14 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("MAF")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["MAF",]), 
+              max(GetAssayData(current_object)["MAF",]), length.out= 4),1)
+
+
+ST_colon4_MAF <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("MAF TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon4_CXCL14
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon4_MAF
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("DCN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["DCN",]), 
+              max(GetAssayData(current_object)["DCN",]), length.out= 4),1)
+
+ST_colon4_DCN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("DCN Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("ETV4")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["ETV4",]), 
+              max(GetAssayData(current_object)["ETV4",]), length.out= 4),1)
+
+
+ST_colon4_ETV4 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("ETV4 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r}
+ST_colon4_DCN
+```
+
+
+```{r}
+ST_colon4_ETV4
+```
+
+
+### ST-Liver 1
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-liver1"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("DCN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["DCN",]), 
+              max(GetAssayData(current_object)["DCN",]), length.out= 4),1)
+
+ST_liver1_DCN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("DCN Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("ETV4")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["ETV4",]), 
+              max(GetAssayData(current_object)["ETV4",]), length.out= 4),1)
+
+
+ST_liver1_ETV4 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("ETV4 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r}
+ST_liver1_DCN
+```
+
+
+```{r}
+ST_liver1_ETV4
+```
+
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("RNF43")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["RNF43",]), 
+              max(GetAssayData(current_object)["RNF43",]), length.out= 4),1)
+
+ST_liver1_RNF43 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("RNF43 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("JUN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["JUN",]), 
+              max(GetAssayData(current_object)["JUN",]), length.out= 4),1)
+
+
+ST_liver1_JUN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("JUN TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r}
+ST_liver1_RNF43
+```
+
+
+```{r}
+ST_liver1_JUN
+```
+
+
+### ST-Liver 2
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-liver2"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("DCN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["DCN",]), 
+              max(GetAssayData(current_object)["DCN",]), length.out= 4),1)
+
+ST_liver2_DCN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("DCN Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("ETV4")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["ETV4",]), 
+              max(GetAssayData(current_object)["ETV4",]), length.out= 4),1)
+
+
+ST_liver2_ETV4 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("ETV4 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r}
+ST_liver2_DCN
+```
+
+
+```{r}
+ST_liver2_ETV4
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("RNF43")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["RNF43",]), 
+              max(GetAssayData(current_object)["RNF43",]), length.out= 4),1)
+
+ST_liver2_RNF43 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("RNF43 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("JUN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["JUN",]), 
+              max(GetAssayData(current_object)["JUN",]), length.out= 4),1)
+
+
+ST_liver2_JUN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("JUN TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r}
+ST_liver2_RNF43
+```
+
+
+```{r}
+ST_liver2_JUN
+```
+
+
+### ST-Liver 4
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-liver4"
+current_object <- seurat_objects[[current_sample]]
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("DCN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["DCN",]), 
+              max(GetAssayData(current_object)["DCN",]), length.out= 4),1)
+
+ST_liver4_DCN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("DCN Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("ETV4")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["ETV4",]), 
+              max(GetAssayData(current_object)["ETV4",]), length.out= 4),1)
+
+
+ST_liver4_ETV4 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("ETV4 TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r}
+ST_liver4_DCN
+```
+
+
+```{r}
+ST_liver4_ETV4
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+DefaultAssay(current_object) <- "SCT"
+current_gene <- c("RNF43")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["RNF43",]), 
+              max(GetAssayData(current_object)["RNF43",]), length.out= 4),1)
+
+ST_liver4_RNF43 <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = current_gene, alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("RNF43 Expression") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+
+
+DefaultAssay(current_object) <- "dorothea"
+current_gene <- c("JUN")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_object)["JUN",]), 
+              max(GetAssayData(current_object)["JUN",]), length.out= 4),1)
+
+
+ST_liver4_JUN <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_object,
+      features = c(current_gene), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("JUN TF activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+```{r}
+ST_liver4_RNF43
+```
+
+
+```{r}
+ST_liver4_JUN
+```
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

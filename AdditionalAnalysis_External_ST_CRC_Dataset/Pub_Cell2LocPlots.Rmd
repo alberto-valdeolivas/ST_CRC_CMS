@@ -1,0 +1,1021 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Cell2Location plots"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+Plot Arrangement of Cell2Location results
+
+# Getting Ready
+
+We first load the libraries and set the paths to the raw data. 
+
+```{r, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(dplyr)
+library(readr)
+library(stringr)
+library(RColorBrewer)
+library(cowplot)
+
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+
+input_folder_seurat <- "ST_LiverMetastases_pub/IntermediaryFiles/"
+input_names_seurat <- "SeuratList_Clusters_Res05.rds"
+files_to_read_seurat <- 
+  paste0(data_directory, analysis_name,input_folder_seurat,input_names_seurat)
+
+
+input_folder_C2L <- 
+  "Cell2Location/results/LocationModelLinearDependentWMultiExperiment_8experiments_36clusters_31296locations_4188genesLiverMetastasis/"
+input_file_C2L <- "W_cell_density_q05.csv"
+files_to_read_C2L <- 
+  paste0(data_directory, analysis_name,input_folder_C2L,input_file_C2L)
+```
+
+We load Seurat objects
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read_seurat)
+```
+
+We Load Cell2Location results 
+
+```{r, warning=FALSE, message=FALSE}
+results_STLiver_Korean <- read_csv(files_to_read_C2L)
+
+colnames(results_STLiver_Korean) <-
+  str_replace(colnames(results_STLiver_Korean), 
+              pattern = "q05_spot_factors", replacement = "")
+
+results_STLiver_Korean <- results_STLiver_Korean %>% 
+  dplyr::mutate(sample = str_extract(.$spot_id, pattern =".*_")) %>%
+  dplyr::mutate(sample = str_remove(.$sample, pattern = "_")) %>% 
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern =".*_")) 
+```
+
+
+### Sample ST-colon1
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-colon1"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_STLiver_Korean %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_STcolon1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_STcolon1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_STcolon1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_STcolon1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_STcolon1 + plot_CMS2_STcolon1 + 
+plot_CMS3_STcolon1 + plot_CMS4_STcolon1
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+```{r}
+plot_CMS1_STcolon1
+```
+
+
+### Sample ST-colon2
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-colon2"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_STLiver_Korean %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_STcolon2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_STcolon2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_STcolon2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_STcolon2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_STcolon2 + plot_CMS2_STcolon2 + 
+plot_CMS3_STcolon2 + plot_CMS4_STcolon2
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+
+### Sample ST-colon3
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-colon3"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_STLiver_Korean %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_STcolon3 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_STcolon3 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_STcolon3 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_STcolon3 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_STcolon3 + plot_CMS2_STcolon3 + 
+plot_CMS3_STcolon3 + plot_CMS4_STcolon3
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+
+### Sample ST-colon4
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-colon4"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_STLiver_Korean %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_STcolon4 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_STcolon4 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_STcolon4 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_STcolon4 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_STcolon4 + plot_CMS2_STcolon4 + 
+plot_CMS3_STcolon4 + plot_CMS4_STcolon4
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+
+### Sample ST-liver1
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-liver1"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_STLiver_Korean %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_STliver1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_STliver1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_STliver1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_STliver1 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_STliver1 + plot_CMS2_STliver1 + 
+plot_CMS3_STliver1 + plot_CMS4_STliver1
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+
+### Sample ST-liver2
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-liver2"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_STLiver_Korean %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_STliver2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_STliver2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_STliver2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_STliver2 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_STliver2 + plot_CMS2_STliver2 + 
+plot_CMS3_STliver2 + plot_CMS4_STliver2
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+
+### Sample ST-liver3
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-liver3"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_STLiver_Korean %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_STliver3 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_STliver3 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_STliver3 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_STliver3 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_STliver3 + plot_CMS2_STliver3 + 
+plot_CMS3_STliver3 + plot_CMS4_STliver3
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+
+### Sample ST-liver4
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- "ST-liver4"
+seurat <- seurat_objects[[current_sample]]
+results_C2L_sample <- results_STLiver_Korean %>%
+  dplyr::filter(sample == current_sample)
+
+seurat@meta.data <- 
+  seurat@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(results_C2L_sample, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id")
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS1"
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS1_STliver4 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS2"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS2_STliver4 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS3"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS3_STliver4 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "CMS4"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_CMS4_STliver4 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+plot_CMS1_STliver4 + plot_CMS2_STliver4 + 
+plot_CMS3_STliver4 + plot_CMS4_STliver4
+  plot_layout(widths = c(1,1), heights = c(1,1), ncol = 2, nrow = 2)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_cell_type <- "SPP1+"
+
+
+breaks_vec <- 
+  round(seq(0, max(pull(seurat@meta.data,current_cell_type)), length.out= 5),1)
+  
+plot_SPP1_STliver4 <- 
+  Seurat::SpatialFeaturePlot(
+    object = seurat,
+    features = c(current_cell_type), alpha = c(0,1), 
+    image.alpha = 0.6, pt.size.factor = 2, stroke = 1) + 
+    ggtitle(current_cell_type) + 
+    scale_fill_gradient2(high = "#67000D", mid = "#FC9272", low = "white", 
+                    breaks=breaks_vec,name=NULL ) + 
+    theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+      legend.text = element_text(size=10, face="bold"),
+      legend.title = element_text(NULL),
+      plot.title = element_text(face = "bold", size= 14, hjust = 0.5)) +
+      theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r}
+plot_SPP1_STliver4
+```
+
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

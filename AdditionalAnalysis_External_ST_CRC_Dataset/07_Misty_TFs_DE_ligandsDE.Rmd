@@ -1,0 +1,378 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Misty"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork,lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(dplyr)
+library(tibble)
+library(readr)
+library(stringr)
+library(cowplot)
+library(RColorBrewer)
+library(mistyR)
+library(purrr)
+library(kableExtra)
+library(pheatmap)
+
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "ST_LiverMetastases_pub/IntermediaryFiles/"
+input_names_2 <- "SeuratList_Clusters_Res05_Dorothea.rds"
+
+files_to_read_2 <- paste0(data_directory, analysis_name,input_files,input_names_2)
+results_directory <- paste0(data_directory, analysis_name, input_files)
+```
+
+```{r, warning=FALSE, message=FALSE}
+## Misty required functions
+run_misty_seurat <- function(visium.slide,
+                             # Seurat object with spatial transcriptomics data.
+                             view.assays,
+                             # Named list of assays for each view.
+                             view.features,
+                             # Named list of features/markers to use.
+                             # Use all by default.
+                             view.types,
+                             # Named list of the type of view to construct
+                             # from the assay.
+                             view.params,
+                             # Named list with parameters (NULL or value)
+                             # for each view.
+                             spot.ids = NULL,
+                             # spot IDs to use. Use all by default.
+                             out.alias = "results"
+                             # folder name for output
+) {
+  # Extracting geometry
+  geometry <- GetTissueCoordinates(visium.slide,
+                                   cols = c("row", "col"), scale = NULL
+  )
+  # Extracting data
+  view.data <- map(view.assays,
+                   extract_seurat_data,
+                   geometry = geometry,
+                   visium.slide = visium.slide
+  )
+  # Constructing and running a workflow
+  build_misty_pipeline(
+    view.data = view.data,
+    view.features = view.features,
+    view.types = view.types,
+    view.params = view.params,
+    geometry = geometry,
+    spot.ids = spot.ids,
+    out.alias = out.alias
+  )
+}
+
+
+
+
+# Extracts data from an specific assay from a Seurat object
+# and aligns the IDs to the geometry
+extract_seurat_data <- function(visium.slide,
+                                assay,
+                                geometry) {
+  data <- GetAssayData(visium.slide, assay = assay) %>% as.matrix() %>%
+    t() %>%
+    as_tibble(rownames = NA)
+  return(data %>% slice(match(rownames(.), rownames(geometry))))
+}
+# Filters data to contain only features of interest
+filter_data_features <- function(data,
+                                 features) {
+  if (is.null(features)) features <- colnames(data)
+  return(data %>% rownames_to_column() %>%
+           dplyr::select(rowname, all_of(features)) %>% rename_with(make.names) %>%
+           column_to_rownames())
+}
+
+
+## View creation
+
+
+
+# Builds views depending on the paramaters defined
+create_default_views <- function(data,
+                                 view.type,
+                                 view.param,
+                                 view.name,
+                                 spot.ids,
+                                 geometry) {
+  view.data.init <- create_initial_view(data)
+  if (!(view.type %in% c("intra", "para", "juxta"))) {
+    view.type <- "intra"
+  }
+  if (view.type == "intra") {
+    data.red <- view.data.tmp$data %>%
+      rownames_to_column() %>%
+      filter(rowname %in% spot.ids) %>%
+      dplyr::select(-rowname)
+  } else if (view.type == "para") {
+    view.data.tmp <- view.data.init %>%
+      add_paraview(geometry, l = view.param)
+    data.ix <- paste0("paraview.", view.param)
+    data.red <- view.data.tmp[[data.ix]]$data %>%
+      mutate(rowname = rownames(data)) %>%
+      filter(rowname %in% spot.ids) %>%
+      dplyr::select(-rowname)
+  } else if (view.type == "juxta") {
+    view.data.tmp <- view.data.init %>%
+      add_juxtaview(
+        positions = geometry,
+        neighbor.thr = view.param
+      )
+    data.ix <- paste0("juxtaview.", view.param)
+    data.red <- view.data.tmp[[data.ix]]$data %>%
+      mutate(rowname = rownames(data)) %>%
+      filter(rowname %in% spot.ids) %>%
+      dplyr::select(-rowname)
+  }
+  if (is.null(view.param) == TRUE) {
+    misty.view <- create_view(
+      paste0(view.name),
+      data.red
+    )
+  } else {
+    misty.view <- create_view(
+      paste0(view.name, "_", view.param),
+      data.red
+    )
+  }
+  clear_cache(view.data.init$misty.uniqueid)
+  return(misty.view)
+}
+
+
+## Building a mistyR pipeline and running the model
+
+
+# Builds automatic MISTy workflow and runs it
+build_misty_pipeline <- function(view.data,
+                                 view.features,
+                                 view.types,
+                                 view.params,
+                                 geometry,
+                                 spot.ids = NULL,
+                                 out.alias = "default") {
+  # Adding all spots ids in case they are not defined
+  if (is.null(spot.ids)) {
+    spot.ids <- rownames(view.data[[1]])
+  }
+  # First filter the features from the data
+  view.data.filt <- map2(view.data, view.features, filter_data_features)
+  # Create initial view
+  views.main <- create_initial_view(view.data.filt[[1]] %>%
+                                      rownames_to_column() %>%
+                                      filter(rowname %in% spot.ids) %>%
+                                      dplyr::select(-rowname))
+  # Create other views
+  view.names <- names(view.data.filt)
+  all.views <- pmap(list(
+    view.data.filt[-1],
+    view.types[-1],
+    view.params[-1],
+    view.names[-1]
+  ),
+  create_default_views,
+  spot.ids = spot.ids,
+  geometry = geometry
+  )
+  pline.views <- add_views(
+    views.main,
+    unlist(all.views, recursive = FALSE)
+  )
+  # Run MISTy
+  run_misty(pline.views, out.alias)
+}
+```
+
+# Results
+
+
+## Reading Seurat objects containing TF activity
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read_2)
+```
+
+
+## Reading Misty results in our set of samples
+
+We need to select the same ligands and receptors that were used in the predictions
+in our own datasets. 
+
+
+```{r, warning=FALSE, message=FALSE}
+results_misty_folders <- paste0(data_directory, analysis_name,
+  "IntermediaryFiles/Misty_Results/results_TF_Ligands_DorotheaClusters/")
+
+misty_results <- 
+  collect_results(as.list(list.dirs(results_misty_folders, recursive = FALSE)))
+
+
+ligands_to_consider <- dplyr::filter(misty_results$importances.aggregated, 
+  view == "juxta.ligands_2") %>% dplyr::pull(Predictor) %>% unique()
+  
+TFs_to_consider <- misty_results$importances.aggregated %>% 
+  dplyr::pull(Target) %>% unique()
+
+ligands_to_remove <- 
+  unique(unlist(lapply(seurat_objects, function(x){
+  DefaultAssay(x) <- "SCT"
+  ligands_to_consider[!(ligands_to_consider %in% rownames(x))]
+})))
+
+ligands_to_consider <- 
+  ligands_to_consider[!(ligands_to_consider %in% ligands_to_remove)]
+```
+
+
+## Running Misty {.tabset}
+
+We define the views. 
+
+```{r, warning=FALSE, message=FALSE}
+# Define assay for each view
+view.assays <- list(
+  "main" = "dorothea",
+  "juxta.ligands" = "SCT"# ,
+  # "para.ligands" = "SCT"
+)
+
+# Define features for each view
+view.features <- list(
+  "main" = TFs_to_consider,
+  "juxta.ligands" = ligands_to_consider # , 
+  # "para.ligands" = slide_ligands
+)
+
+# Define spatial context for each view
+view.types <- list(
+  "main" = "intra",
+  "juxta.ligands" = "juxta"  # ,
+#   "para.ligands" = "para"
+)
+
+# Define additional parameters (l in the case of paraview)
+view.params <- list(
+  "main" = NULL,
+  "juxta.ligands" = 2 # ,
+  # "para.ligands" = 10
+)
+```
+
+
+```{r, warning=FALSE, message=FALSE, results='asis', fig.height=12, fig.width=12}
+my_ligands <- c("RNF43", "PLAU", "MMP1", "CXCL14", "DCN", "THBS2", "LUM")
+
+seurat_objects <- seurat_objects[-3]
+
+for (current_sample in names(seurat_objects)){
+  
+  cat( "### Sample :", current_sample ,"\n\n" )  
+  
+  current_seurat_obj <- seurat_objects[[current_sample]]
+  # current_seurat_obj <- subset(x = Seurat_merge_object, idents = c("0", "5"))
+  DefaultAssay(current_seurat_obj) <- "SCT"
+  
+  misty.out <- 
+    paste0(results_directory, 
+         "results_TF_Ligands_DorotheaClusters/", 
+         current_sample)
+  
+  misty.results <- run_misty_seurat(
+    visium.slide = current_seurat_obj,
+    view.assays = view.assays,
+    view.features = view.features,
+    view.types = view.types,
+    view.params = view.params,
+    spot.ids = NULL, # Using the whole slide
+    out.alias = misty.out
+    ) %>%
+  collect_results()
+
+  #misty.results %>%
+  #  plot_improvement_stats("gain.R2")
+  
+  
+  #cat( "\n\n" ) 
+  
+  #misty.results %>%
+  #  plot_improvement_stats("gain.RMSE") 
+  
+  
+  #cat( "\n\n" ) 
+  
+  #print(misty.results$improvements %>%
+  #  filter(measure == "p.R2") %>%
+  #  arrange(value) %>% 
+  #  dplyr::select(-sample) %>% 
+  #  kbl() %>% kable_styling())
+  
+  #cat( "\n\n" ) 
+  
+  #misty.results %>% plot_view_contributions()
+
+  #cat( "\n\n" ) 
+  
+  
+  #misty.results %>% plot_interaction_heatmap(view = "intra") 
+  
+  #cat( "\n\n" ) 
+  
+  # misty.results %>% plot_interaction_heatmap(view = #"juxta.ligands_2") 
+  
+  print(misty.results$importances.aggregated %>% 
+    dplyr::filter(view == "juxta.ligands_2") %>% 
+    dplyr::filter(Predictor %in% my_ligands) %>% 
+    dplyr::arrange(desc(Importance)) %>% kbl() %>% 
+    kable_styling())
+  
+
+  cat( "\n\n" ) 
+  
+}
+```
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```
+
+
+
+

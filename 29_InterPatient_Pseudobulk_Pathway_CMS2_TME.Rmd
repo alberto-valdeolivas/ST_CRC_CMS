@@ -1,0 +1,257 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: DEA tumor VS non-tumor"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/pstore/data/biomics/_pre_portfolio/_platform_evaluation/SpatialTranscriptomics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning=FALSE, message=FALSE}
+# library(dplyr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(patchwork, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+library(scater, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(Seurat, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(readr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(stringr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(purrr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+# library(tidyr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(cowplot, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(ggpubr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(msigdbr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(clusterProfiler, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(kableExtra, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(progeny, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(ComplexHeatmap, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+
+source(file = "WrapperFunction/SeuratWrappers.R")
+source(file = "WrapperFunction/PseudoBulkUtils.R")
+
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_folder <- "IntermediaryFiles/"
+input_names_1 <- "SeuratList_Clusters_Res05.rds"
+input_names_2 <- "Patho_Annotations/"
+
+files_to_read_1 <- paste0(data_directory, analysis_name,input_folder,input_names_1)
+files_to_read_2 <- paste0(data_directory, analysis_name,input_folder,input_names_2)
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+
+samples_to_consider <- c("SN048_A121573_Rep1", "SN048_A121573_Rep2",
+  "SN123_A595688_Rep1","SN124_A595688_Rep2", "SN123_A938797_Rep1_X", 
+  "SN124_A938797_Rep2", "SN84_A120838_Rep1", "SN84_A120838_Rep2")
+```
+
+I include pathologist annotations to the Seurat objects
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read_1)
+seurat_objects_CMS2 <- seurat_objects[samples_to_consider]
+
+tumor_annotations <- c("tumor")
+tumor_annotations_all <- 
+  c("tumor", "tumor&stroma_IC med to high", "tumor&stroma_IC low", 
+    "tumor&stroma IC med to high")
+
+seurat_objects_CMS2_OnlyTumor <- 
+  lapply(seurat_objects_CMS2, function(x){
+    current_sample <- unique(x@meta.data$orig.ident)
+    
+    patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".csv"))
+    
+    colnames(patho_anno_current_sample) <- c("Barcode", "Pathologist_Annotations")
+    
+    x@meta.data <- x@meta.data %>%
+      tibble::rownames_to_column("spot_id") %>%
+      dplyr::left_join(patho_anno_current_sample, by = c("spot_id" = "Barcode")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+        "tumor&stroma IC med to high", "tumor&stroma_IC med to high")) %>% 
+      tibble::column_to_rownames("spot_id") 
+      
+    
+    
+    Idents(x) <- 'Pathologist_Annotations'
+     x <- subset(x, idents = intersect(levels(Idents(x)), tumor_annotations))
+
+    return(x)
+})
+```
+
+We retrieve the neighboring spots of the tumor
+
+```{r, warning=FALSE, message=FALSE}
+treshold_dist <- 2 
+Spots_CMS2_neighborhood <- 
+  lapply(seurat_objects_CMS2, function(x){
+    
+    current_sample <- unique(x@meta.data$orig.ident)
+    
+    geometry <- GetTissueCoordinates(x, cols = c("row", "col"), scale = NULL)
+    
+    dist_matrix <- dist(geometry, method = "euclidean") %>% as.matrix()
+    
+    patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".csv"))
+    
+    colnames(patho_anno_current_sample) <- c("Barcode", "Pathologist_Annotations")
+    
+    all_spots <- rownames(geometry)
+    
+    tumor_spots <- 
+      dplyr::filter(patho_anno_current_sample, Pathologist_Annotations  %in% tumor_annotations) %>% 
+      dplyr::pull(Barcode)  %>% intersect(all_spots)
+    
+    
+    neighbors_spots_list <-  tumor_spots %>% 
+      map(function(y) {
+        names(which(dist_matrix[all_spots, y] <= treshold_dist))
+      })
+    
+    neighbors_spots <- setdiff(unique(unlist(neighbors_spots_list)),tumor_spots )
+    
+    return(neighbors_spots)
+})
+```
+
+# Results
+
+## Tumor spots
+
+We generate pseudobulk using the tumor spots of the different samples. We 
+perform cpm normalization and run progeny. 
+
+```{r, warning=FALSE, message=FALSE}
+pseudobulk_profiles <- lapply(seurat_objects_CMS2_OnlyTumor, get_sample_pseudo)
+
+
+gex <- do.call(cbind, lapply(pseudobulk_profiles, function(x){
+  assay(x)}))
+
+## We change the names for the plotting: 
+colnames(gex) <- 
+  c("S5_Rec_Rep1", "S5_Rec_Rep2", "S2_Col_R_Rep1","S2_Col_R_Rep2",
+    "S6_Rec_Rep1","S6_Rec_Rep2","S4_Col_Sig_Rep1","S4_Col_Sig_Rep2")
+
+gex <- gex %>%
+  edgeR_filtering(expression_matrix = . , min.count = 50, 
+                  min.prop = 0, min.total.count = 0)
+
+cpm_gex <-  cpm_norm(expression_matrix = gex)
+```
+
+```{r, warning=FALSE, message=FALSE}
+ilr_pcs <- prcomp(x = t(cpm_gex),center = T,scale. = T)
+ilr_pcs <- ilr_pcs$x %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("col_id")
+
+ilr_pcs %>%
+  ggplot(aes(x = PC1, y = PC2, 
+             color = col_id)) +
+  geom_point(size = 5) +
+  theme_classic()
+```
+
+```{r, warning=FALSE, message=FALSE}
+pb_progeny <- 
+  progeny(cpm_gex, scale = T, organism = "Human", top = 500, perm = 1)
+progeny_matrix <- t(as.matrix(pb_progeny))
+progeny_matrix <- progeny_matrix[, sort(colnames(progeny_matrix))]
+
+# Heatmap(t(pb_progeny))
+pheatmap(progeny_matrix ,treeheight_row=0,treeheight_col=0, cluster_cols = FALSE)
+```
+
+## TME spots
+
+Same procedure for the TME
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects_CMS2_OnlyTME <-
+  map2(seurat_objects_CMS2, Spots_CMS2_neighborhood, function(x,y){
+  
+  x <- subset(x, cells = y)
+  
+  return(x)
+})
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+pseudobulk_profiles <- lapply(seurat_objects_CMS2_OnlyTME, get_sample_pseudo)
+
+gex <- do.call(cbind, lapply(pseudobulk_profiles, function(x){
+  assay(x)}))
+
+## We change the names for the plotting: 
+colnames(gex) <- 
+  c("S5_Rec_Rep1", "S5_Rec_Rep2", "S2_Col_R_Rep1","S2_Col_R_Rep2",
+    "S6_Rec_Rep1","S6_Rec_Rep2","S4_Col_Sig_Rep1","S4_Col_Sig_Rep2")
+
+gex <- gex %>%
+  edgeR_filtering(expression_matrix = . , min.count = 50, 
+                  min.prop = 0, min.total.count = 0)
+
+cpm_gex <-  cpm_norm(expression_matrix = gex)
+```
+
+```{r, warning=FALSE, message=FALSE}
+ilr_pcs <- prcomp(x = t(cpm_gex),center = T,scale. = T)
+ilr_pcs <- ilr_pcs$x %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("col_id")
+
+ilr_pcs %>%
+  ggplot(aes(x = PC1, y = PC2, 
+             color = col_id)) +
+  geom_point(size = 5) +
+  theme_classic()
+```
+
+```{r, warning=FALSE, message=FALSE}
+pb_progeny <- 
+  progeny(cpm_gex, scale = T, organism = "Human", top = 500, perm = 1)
+progeny_matrix <- t(as.matrix(pb_progeny))
+progeny_matrix <- progeny_matrix[, sort(colnames(progeny_matrix))]
+
+# Heatmap(t(pb_progeny))
+pheatmap(progeny_matrix ,treeheight_row=0,treeheight_col=0, cluster_cols = FALSE, fontsize = 12)
+```
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

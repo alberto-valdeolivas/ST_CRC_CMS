@@ -2,13 +2,13 @@
 
 This folder contains the scripts created to study the intra-patient heterogeneity in a couple of tumors classified as CMS2 in our set of samples. In particular, it contains the following scripts: 
 
-* 
+* [34_GeneExpressionGradients_SampleA595688_Rep1](https://github.com/alberto-valdeolivas/ST_CRC_CMS/blob/main/IntraPatient_Heterogeneity/34_GeneExpressionGradients_SampleA595688_Rep1.Rmd): This script extract the CMS2 tumor annotated spots from the S2_Col_R_Rep1 sample and assign them to different categories regarding their distance to non-tumor spots. Like this, we create a zonation model to distinguish different tumor regions (solid internal areas versus peripheral areas in contact with stromal regions). Among others, this script contains the code to generate the Figure 3g-h and the Supplementary Figures S26-S28 and Supplementary table 4. 
+* [32_02_IntraPatient_BayesSpace_SampleA121573_Rep1](https://github.com/alberto-valdeolivas/ST_CRC_CMS/blob/main/IntraPatient_Heterogeneity/32_02_IntraPatient_BayesSpace_SampleA121573_Rep1.Rmd): This script extract the CMS2 tumor annotated spots from the S5_Rec_Rep1 sample and performs sublustering on them using BayesSpace. In particular, it contains the code to generate the figure 3i and Supplementary Figures S29-S30 and the data from Supplementary table 5. 
+*[32_03_IntraPatient_BayesSpace_SampleA121573_Rep1_PathwayActivity](https://github.com/alberto-valdeolivas/ST_CRC_CMS/blob/main/IntraPatient_Heterogeneity/32_03_IntraPatient_BayesSpace_SampleA121573_Rep1_PathwayActivity.Rmd): This scripts uses BayesSpace to compute pathway activity at an enhanced resolution in the clusters resulting from the previous script. Among others, it contains the code to generate the Figure 3j and the Supplementary Figure S31.  
 
 
 
 
-* [27_InterPatient_Het_UMAP_Harmony_OnlyCMS2](https://github.com/alberto-valdeolivas/ST_CRC_CMS/blob/main/InterPatient_Heterogeneity/27_InterPatient_Het_UMAP_Harmony_OnlyCMS2.Rmd): In this script, we extract the tummor annotated spots of the CMS2 samples and integrate them into the same lower dimensional space (UMAP) after correcting for batch effect. Among others, it contains the scripts to generate Figure 3a-d and Supplementary Figure S21. 
-* [ProportionsCMS2Tumor_OnlyTumor.Rmd](https://github.com/alberto-valdeolivas/ST_CRC_CMS/blob/main/InterPatient_Heterogeneity/ProportionsCMS2Tumor_OnlyTumor.Rmd): This script explore the difference cell abundances as estimated by the deconvolution in the CMS2 tumor annotated and their surrounding spots. Among others, it contains the code to generate the Figure 3e and the Supplementary Figures S22 and S25. 
-* [28_InterPatient_DEA_OnlyCMS2](https://github.com/alberto-valdeolivas/ST_CRC_CMS/blob/main/InterPatient_Heterogeneity/28_InterPatient_DEA_OnlyCMS2.Rmd): This script contains the code to perform the differential gene expression analysis and overrepresentation analysis which resutls are displayed in the Supplementary table 3. 
-* [29_InterPatient_PseudobulPathway_CMS2_TME](https://github.com/alberto-valdeolivas/ST_CRC_CMS/blob/main/InterPatient_Heterogeneity/29_InterPatient_PseudobulPathway_CMS2_TME.Rmd): This script contains the code to generate pseudobulk of the tumor and tumor-surrounding spots and compare their pathways activities between the different CMS2 tumor patients. Among others, it cotains the code to generate the Figure 3f and the supplementary figure S23. 
-* [30_InterPatient_Pseudobulk_TFs_CMS2_TME](https://github.com/alberto-valdeolivas/ST_CRC_CMS/blob/main/InterPatient_Heterogeneity/30_InterPatient_Pseudobulk_TFs_CMS2_TME.Rmd): This script contains the code to generate pseudobulk of the tumor and tumor-surrounding spots and compare their TF activities between the different CMS2 tumor patients. Among others, it contains the code to generate the Supplementary Figure S24. 
+
+
+

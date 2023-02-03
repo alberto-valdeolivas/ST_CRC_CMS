@@ -1,0 +1,835 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Proportion Plots"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+# library(SeuratObject)
+library(readr)
+library(stringr)
+library(purrr)
+library(cowplot)
+library(ggpubr)
+library(kableExtra)
+
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_folder <- "IntermediaryFiles/"
+input_names_1 <- "SeuratList_Clusters_Res05.rds"
+input_names_2 <- "Patho_Annotations/"
+
+files_to_read_1 <- paste0(data_directory, analysis_name,input_folder,input_names_1)
+files_to_read_2 <- paste0(data_directory, analysis_name,input_folder,input_names_2)
+
+df_patient_ID_transform <- data.frame(
+  patient = c("A120838","A121573","A416371","A551763","A595688","A798015",
+              "A938797"), 
+  patient_ID = c("S4_Col_Sig","S5_Rec","S3_Col_R","S1_Cec","S2_Col_R",
+                 "S7_Rec/Sig","S6_Rec"))
+
+samples_to_consider <- c("SN048_A121573_Rep1", "SN048_A121573_Rep2",
+  "SN123_A595688_Rep1","SN124_A595688_Rep2", "SN123_A938797_Rep1_X", 
+  "SN124_A938797_Rep2", "SN84_A120838_Rep1", "SN84_A120838_Rep2")
+```
+
+We include pathologist annotations into Seurat objects
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read_1)
+seurat_objects_CMS2 <- seurat_objects[samples_to_consider]
+
+## Attention: in one sample annotated as "tumor&stroma IC med to high"
+## instead of "tumor&stroma IC med to high"
+tumor_annotations_all <- 
+  c("tumor", "tumor&stroma_IC med to high", "tumor&stroma_IC low", 
+    "tumor&stroma IC med to high")
+tumor_annotations <- 
+  c("tumor")
+
+seurat_objects_CMS2_subset <- 
+  lapply(seurat_objects_CMS2, function(x){
+    current_sample <- unique(x@meta.data$orig.ident)
+    
+    patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".csv"))
+    
+    colnames(patho_anno_current_sample) <- c("Barcode", "Pathologist_Annotations")
+    
+    x@meta.data <- x@meta.data %>%
+      tibble::rownames_to_column("spot_id") %>%
+      dplyr::left_join(patho_anno_current_sample, by = c("spot_id" = "Barcode")) %>%
+      dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+        "tumor&stroma IC med to high", "tumor&stroma_IC med to high")) %>% 
+      tibble::column_to_rownames("spot_id") 
+      
+    
+    Idents(x) <- 'Pathologist_Annotations'
+    x <- subset(x, idents = intersect(levels(Idents(x)), tumor_annotations))
+    
+    return(x)
+})
+
+
+# We generate a file to export for the microbiome part.
+patho_anno_current_sample_all <- data.frame()
+for (current_sample in samples_to_consider){
+  
+    patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".csv"))
+    
+    colnames(patho_anno_current_sample) <- c("Barcode", "Pathologist_Annotations")
+    
+    patho_anno_current_sample$sample <- current_sample
+    
+    patho_anno_current_sample_all <- 
+      rbind(patho_anno_current_sample_all, patho_anno_current_sample)
+}
+
+patho_anno_current_sample_all_toexport <- 
+  patho_anno_current_sample_all %>% 
+  dplyr::mutate(patient = str_match(sample, "_\\s*(.*?)\\s*_")[,2]) %>% 
+  dplyr::mutate(sample = str_replace(sample, "SN123_A938797_Rep1_X", "SN123_A938797_Rep1")) %>% 
+  dplyr::mutate(replicate = str_remove(sample, "[^A]+")) %>%
+  dplyr::mutate(rep = str_remove(replicate, "[^R]+")) %>% 
+  dplyr::left_join(df_patient_ID_transform) %>% 
+  dplyr::mutate(patient_ID = paste0(patient_ID, "_", rep))
+
+saveRDS(patho_anno_current_sample_all_toexport, 
+  paste0(data_directory, analysis_name, input_folder, "Microbiome/tumor_spots.rds"))
+```
+
+We make the frequency/proportion plots with the annotations. 
+
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects_CMS2_merge <- 
+  merge(x= seurat_objects_CMS2_subset[[1]],y=seurat_objects_CMS2_subset[-1])
+
+df_plot_Anno <- 
+  seurat_objects_CMS2_merge@meta.data %>% 
+  dplyr::select(orig.ident, Pathologist_Annotations) %>% 
+  dplyr::group_by(orig.ident) %>% 
+  dplyr::count(Pathologist_Annotations) %>% 
+  dplyr::mutate(patient = str_match(orig.ident, "_\\s*(.*?)\\s*_")[,2]) %>% 
+  dplyr::mutate(replicate = str_remove(orig.ident, "[^A]+")) %>%
+  dplyr::mutate(replicate = str_replace(replicate, "A938797_Rep1_X", "A938797_Rep1")) %>% 
+  dplyr::mutate(rep = str_remove(replicate, "[^R]+")) %>% 
+  dplyr::left_join(df_patient_ID_transform) %>% 
+  dplyr::mutate(patient_ID = paste0(patient_ID, "_", rep))
+
+
+df_plot_Anno$patient_ID <- 
+  factor(df_plot_Anno$patient_ID , 
+         levels = sort(unique(df_plot_Anno$patient_ID), decreasing = TRUE))
+
+plot_annotations <- 
+  ggplot(df_plot_Anno,aes(x = patient_ID , y= n , fill = Pathologist_Annotations)) +   
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+  theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="CMS2 Annotations \n\ Proportions", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.5,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 2 , reverse = TRUE))
+
+
+df_plot_Anno_totals_CMS2 <- 
+  df_plot_Anno %>% dplyr::group_by(patient_ID) %>% 
+  dplyr::summarise(total_spots = sum(n ))
+
+plot_totals_CMS2 <- df_plot_Anno_totals_CMS2 %>% 
+  ggplot(aes(x=total_spots, y=patient_ID      )) + geom_point(size=3, col="black") +
+  scale_x_continuous(trans = "log2", position = "top") + 
+  theme(axis.title.y = element_blank(), # axis.text.y = element_blank(), 
+        axis.ticks = element_blank(), panel.border = element_blank(),
+        panel.grid.minor = element_blank(), panel.grid.major.y =  element_blank(),
+        panel.grid.major.x = element_line(size=1, linetype=2, colour="Darkred"), 
+        axis.title.x = element_text(size=14, face = "bold", family="Arial"), 
+        axis.text.x = element_text(size=12, face = "bold", family="Arial")) + 
+  labs(x="Spots Annotated \n\ as Tumor") 
+```
+
+Then, we read cell2location results, to explore the cell type content/abundance 
+of this tumor annotated spots
+
+```{r, warning=FALSE, message=FALSE}
+filename_results_C2L_Korean <- paste0(data_directory, analysis_name, "Cell2Location/results/LocationModelLinearDependentWMultiExperiment_14experiments_36clusters_20654locations_4188genes/W_cell_density_q05.csv")
+  
+
+results_C2L_Korean <- read_csv(filename_results_C2L_Korean) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern = "Count_")) %>%
+  dplyr::mutate(spot_id = str_replace(.$spot_id, pattern = "SN123_A938797_Rep1_" ,
+                                      replacement = "SN123_A938797_Rep1_X_")) 
+
+colnames(results_C2L_Korean) <-
+  str_replace(colnames(results_C2L_Korean), 
+              pattern = "q05_spot_factors", replacement = "")
+
+results_C2L_Korean <- results_C2L_Korean %>% 
+  dplyr::mutate(sample = str_extract(.$spot_id, pattern =".*Rep[1-2]")) %>%
+  dplyr::mutate(spot_id = str_remove(.$spot_id, pattern =".*Rep[1-2]_")) %>%
+  dplyr::mutate(spot_id = str_remove(spot_id, pattern = "^X_")) %>%
+  tidyr::pivot_longer(!c(spot_id,sample), names_to = "Cell_subtype", values_to = "cell_density_q05") 
+```
+
+We then match the spots annotated as tumors with the results of cell2location
+
+```{r, warning=FALSE, message=FALSE}
+spots_tumor_annotations <- seurat_objects_CMS2_merge@meta.data %>% 
+  dplyr::select(orig.ident, Pathologist_Annotations) %>% 
+  tibble::rownames_to_column(var = "spot_id") %>%
+  dplyr::mutate(spot_id = str_remove(spot_id, "_[0-9]")) %>% 
+  dplyr::mutate(orig.ident = str_replace(orig.ident, "SN123_A938797_Rep1_X", "SN123_A938797_Rep1"))
+
+
+df_C2L_PathoAnno_CMS2_content <- results_C2L_Korean %>%
+  dplyr::inner_join(spots_tumor_annotations, by = c("spot_id" = "spot_id", "sample" = "orig.ident")) %>%
+  # dplyr::filter(Cell_subtype != "CMS2") %>% 
+  dplyr::mutate(Cell_subtype = ifelse(Cell_subtype == "CMS2", "CMS2", "Other")) %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  dplyr::summarise_all(dplyr::funs(sum)) %>% 
+  dplyr::mutate(patient = str_match(sample , "_\\s*(.*?)\\s*_")[,2]) %>% 
+  dplyr::mutate(replicate = str_remove(sample , "[^A]+")) %>%
+  dplyr::mutate(rep = str_remove(replicate, "[^R]+")) %>% 
+  dplyr::left_join(df_patient_ID_transform) %>% 
+  dplyr::mutate(patient_ID = paste0(patient_ID, "_", rep)) 
+
+
+# %>% 
+#  dplyr::group_by(patient_ID) %>% 
+# dplyr::slice_max(order_by=cell_density_q05, n=nr_celltypes_to_include) %>% 
+# dplyr::ungroup()
+
+
+df_C2L_PathoAnno_CMS2_content$patient_ID  <- 
+  factor(df_C2L_PathoAnno_CMS2_content$patient_ID , 
+         levels = sort(unique(df_C2L_PathoAnno_CMS2_content$patient_ID), decreasing = TRUE))
+
+plot_inner_frequency_CMS2_Others <- 
+  ggplot(df_C2L_PathoAnno_CMS2_content,aes(x = patient_ID  , y= cell_density_q05, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+  theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="CMS2 Proportions \n\ in Tumors ", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.5,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 2))
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300, fig.height=6, fig.width=6}
+plot_inner_frequency_CMS2_Others
+```
+
+```{r, warning=FALSE, message=FALSE}
+df_C2L_PathoAnno_CMS2_content %>% 
+  dplyr::group_by(patient_ID) %>% 
+  dplyr::mutate(proportions = cell_density_q05/sum(cell_density_q05)) %>% 
+  dplyr::select(patient_ID, Cell_subtype, proportions) %>% 
+  dplyr::arrange(desc(patient_ID), desc(proportions)) %>% 
+  kbl() %>% kable_styling()
+```
+
+
+## Check the Neighborhood of the tumor{.tabset}
+
+I check the neighborhood of all the spots annotated as tumor. 
+
+```{r, warning=FALSE, message=FALSE}
+treshold_dist <- 2 
+Spots_CMS2_neighborhood <- 
+  lapply(seurat_objects_CMS2, function(x){
+    
+    current_sample <- unique(x@meta.data$orig.ident)
+    
+    geometry <- GetTissueCoordinates(x, cols = c("row", "col"), scale = NULL)
+    
+    dist_matrix <- dist(geometry, method = "euclidean") %>% as.matrix()
+    
+    patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".csv"))
+    
+    colnames(patho_anno_current_sample) <- c("Barcode", "Pathologist_Annotations")
+    
+    all_spots <- rownames(geometry)
+    
+    tumor_spots <- 
+      dplyr::filter(patho_anno_current_sample, Pathologist_Annotations  %in% tumor_annotations) %>% 
+      dplyr::pull(Barcode)  %>% intersect(all_spots)
+    
+    
+    neighbors_spots_list <-  tumor_spots %>% 
+      map(function(y) {
+        names(which(dist_matrix[all_spots, y] <= treshold_dist))
+      })
+    
+    neighbors_spots <- setdiff(unique(unlist(neighbors_spots_list)),tumor_spots )
+    
+    return(neighbors_spots)
+})
+```
+
+```{r, warning=FALSE, message=FALSE, results='asis'}
+for (current_sample in names(seurat_objects_CMS2)){
+  
+  cat("### Current Sample: ", current_sample, "\n\n")
+  
+  patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".csv"))
+  
+  colnames(patho_anno_current_sample) <- c("Barcode", "Pathologist_Annotations")
+
+  
+  tumor_spots <- 
+      dplyr::filter(patho_anno_current_sample, Pathologist_Annotations  == "tumor") %>% 
+      dplyr::pull(Barcode)
+  
+  print(SpatialPlot(seurat_objects_CMS2[[current_sample]], 
+              image.alpha = 0.5, crop = TRUE, 
+        cells.highlight = list(tumor_spots,Spots_CMS2_neighborhood[[current_sample]]), 
+        pt.size.factor = 2.25,  stroke = 1, 
+        facet.highlight = TRUE) + 
+          NoLegend()) 
+  
+  
+  cat("\n\n")
+}
+```
+
+
+
+## Enrichment and depletion in the tumor neighborhood
+
+```{r, warning=FALSE, message=FALSE}
+neigh_spots_df <- data.frame(
+  sample = rep(names(Spots_CMS2_neighborhood), 
+               lapply(Spots_CMS2_neighborhood, length)), 
+  spot_id = unlist(Spots_CMS2_neighborhood)) %>% 
+  dplyr::mutate(sample = str_replace(sample, "A938797_Rep1_X", "A938797_Rep1"))
+
+# We save the data for microbiome analysis
+neigh_spots_df_toexport <- 
+  neigh_spots_df %>% 
+  dplyr::mutate(patient = str_match(sample, "_\\s*(.*?)\\s*_")[,2]) %>% 
+  dplyr::mutate(sample = str_replace(sample, "SN123_A938797_Rep1_X", "SN123_A938797_Rep1")) %>% 
+  dplyr::mutate(replicate = str_remove(sample, "[^A]+")) %>%
+  dplyr::mutate(rep = str_remove(replicate, "[^R]+")) %>% 
+  dplyr::left_join(df_patient_ID_transform) %>% 
+  dplyr::mutate(patient_ID = paste0(patient_ID, "_", rep))
+
+saveRDS(neigh_spots_df_toexport, 
+  paste0(data_directory, analysis_name, input_folder, "Microbiome/TME_spots.rds"))
+```
+
+
+```{r, warning=FALSE, message=FALSE, eval=FALSE}
+samples_to_consider <- c("SN048_A121573_Rep1", "SN048_A121573_Rep2",
+  "SN123_A595688_Rep1","SN124_A595688_Rep2", "SN123_A938797_Rep1", 
+  "SN124_A938797_Rep2", "SN84_A120838_Rep1", "SN84_A120838_Rep2")
+
+df_C2L_Proportions_Allspots <- results_C2L_Korean %>%
+  # dplyr::filter(Cell_subtype != "CMS2") %>% 
+  dplyr::filter(Cell_subtype != "Unknown") %>%
+  dplyr::filter(sample %in% samples_to_consider) %>% 
+  dplyr::select(spot_id, sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::mutate(spot_sample_id = paste0(sample, "_", spot_id)) %>% 
+  dplyr::group_by(spot_sample_id) %>% 
+  dplyr::mutate(Proportions_perSpot = cell_density_q05/sum(cell_density_q05)) %>%
+  dplyr::ungroup()
+  
+avg_proportion_TME <- results_C2L_Korean %>%
+  dplyr::inner_join(neigh_spots_df, by = c("spot_id" = "spot_id", "sample" = "sample")) %>% 
+  # dplyr::filter(Cell_subtype != "CMS2") %>%
+  dplyr::filter(Cell_subtype != "Unknown") %>%
+  dplyr::select(spot_id, sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::mutate(spot_sample_id = paste0(sample, "_", spot_id)) %>% 
+  dplyr::group_by(spot_sample_id) %>% 
+  dplyr::mutate(Proportions_perSpot = cell_density_q05/sum(cell_density_q05)) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(sample, Cell_subtype) %>% 
+  dplyr::mutate(avg_proportion_cell_TME = mean(Proportions_perSpot)) %>%
+  dplyr::distinct(sample, Cell_subtype, avg_proportion_cell_TME)
+
+
+n_random <- 10000
+df_all <- data.frame()
+for (current_sample in samples_to_consider){
+  
+  df_sample <- df_C2L_Proportions_Allspots %>% 
+      dplyr::filter(sample == current_sample)
+  
+  df_sample_final <- data.frame()
+  
+  for (i in seq(n_random)){
+    
+     df_sample_random <- df_sample %>% 
+        dplyr::mutate(rand_proportions = base::sample(Proportions_perSpot)) %>%
+        dplyr::inner_join(neigh_spots_df, by = c("spot_id" = "spot_id", "sample" = "sample")) %>%
+        dplyr::group_by(Cell_subtype) %>% 
+        dplyr::mutate(avg_proportion_random = mean(rand_proportions)) %>%
+        dplyr::distinct(sample, Cell_subtype, avg_proportion_random)
+  
+     df_sample_random_real <- df_sample_random %>% 
+       dplyr::inner_join(avg_proportion_TME) %>%
+       dplyr::mutate(difference_real_random = avg_proportion_cell_TME - avg_proportion_random) %>%
+       dplyr::select(sample, Cell_subtype, difference_real_random)
+     
+     df_sample_final <- rbind(df_sample_final, df_sample_random_real)
+     
+  }  
+  
+  df_to_add <-df_sample_final %>% dplyr::group_by(Cell_subtype) %>% 
+    dplyr::mutate(NES = mean(difference_real_random)/sd(difference_real_random)) %>% 
+    dplyr::distinct(sample, Cell_subtype, NES)
+  
+  df_all <- rbind(df_all, df_to_add)
+  
+}
+saveRDS(df_all, 
+  paste0(data_directory, analysis_name, input_folder, "df_all_random.rds"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+df_all <- 
+  readRDS(paste0(data_directory, analysis_name, input_folder, "df_all_random.rds"))
+
+## Which cell types are we going to plot: 
+# cells_to_visualize <- 
+#   final_df_avg %>% 
+#  dplyr::arrange(desc(abs(NES))) %>% 
+#  dplyr::distinct(Cell_subtype) %>% 
+#   dplyr::pull(Cell_subtype) %>% head(n=10)
+
+final_df_avg_toplot<- df_all %>% 
+  # dplyr::filter(Cell_subtype %in% cells_to_visualize) %>% 
+  dplyr::mutate(patient = str_match(sample, "_\\s*(.*?)\\s*_")[,2]) %>% 
+  dplyr::mutate(replicate = str_remove(sample, "[^A]+")) %>%
+  dplyr::mutate(rep = str_remove(replicate, "[^R]+")) %>% 
+  dplyr::left_join(df_patient_ID_transform) %>% 
+  dplyr::mutate(patient_ID = paste0(patient_ID, "_", rep)) %>% 
+  dplyr::mutate(Direction = ifelse(NES >= 0, "Enrichment", "Depletion"))
+
+
+final_df_avg_toplot$patient_ID  <- 
+  factor(final_df_avg_toplot$patient_ID , 
+         levels = sort(unique(final_df_avg_toplot$patient_ID), decreasing = TRUE))
+
+  
+enrichment_depletion_plot <- 
+  ggplot(final_df_avg_toplot, aes(x = patient_ID, 
+    y = Cell_subtype, colour = Direction, size = abs(NES))) + 
+    geom_point() + 
+    scale_size_continuous(range = c(1.5, 9.5), breaks = c(5,35), labels = c("Small","Large")) + theme_bw() + 
+    theme(axis.title = element_blank(), 
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1),
+          axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+          plot.title =  element_text(face="bold", size=14, hjust = 0.5) , 
+          legend.position ="right", legend.text = element_text(size=10, face="bold", family="Arial"),
+          legend.title =  element_text(size=12, face="bold", family="Arial")) +
+          scale_color_manual(values = c( "#377EB8", "#E41A1C")) + 
+          coord_flip() + 
+          guides(col = guide_legend(order = 1, override.aes = list(size = 5)),  
+          size =guide_legend(title = "Size Effect", order =2, override.aes = list(size = c(3.5,7.5)))) +
+          labs(title ="Enrichment \n\ Depletion") 
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=300, fig.height=8, fig.width=10}
+enrichment_depletion_plot
+```
+
+
+## Which are the main other tumor populations in the inner tumor? 
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE}
+df_C2L_proportions <- results_C2L_Korean %>%
+  dplyr::inner_join(spots_tumor_annotations, by = c("spot_id" = "spot_id", "sample" = "orig.ident")) %>%
+  dplyr::filter(Cell_subtype != "CMS2") %>% 
+  dplyr::filter(Cell_subtype != "Unknown") %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype, spot_id) %>% 
+  dplyr::mutate(spot_sample_id = paste0(sample, "_", spot_id)) %>% 
+  dplyr::group_by(spot_sample_id) %>% 
+  dplyr::mutate(Proportions_perSpot = cell_density_q05/sum(cell_density_q05)) %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(patient = str_match(sample , "_\\s*(.*?)\\s*_")[,2])
+
+df_all_kruskal_results <- data.frame()
+
+for (current_celltype in unique(df_C2L_proportions$Cell_subtype)){
+  current_df <- 
+    df_C2L_proportions %>% dplyr::filter(Cell_subtype == current_celltype)
+  current_kruskal_results <- 
+    kruskal.test(Proportions_perSpot ~ patient, data = current_df)
+  # boxplot(Proportions_perSpot ~ patient, data = current_df)
+  current_kruskal_df <- 
+    data.frame( cell_type = current_celltype,
+      statistic = current_kruskal_results$statistic, 
+      p.value = current_kruskal_results$p.value)                                
+
+  df_all_kruskal_results <- rbind(df_all_kruskal_results, current_kruskal_df)
+}
+
+df_C2L_proportions_patient_topCells <- df_C2L_proportions %>% 
+  dplyr::group_by(patient, Cell_subtype) %>% 
+  dplyr::mutate(avg_patient_celltype = mean(cell_density_q05)) %>% 
+  dplyr::select(patient, Cell_subtype, avg_patient_celltype) %>% 
+  dplyr::distinct() %>% dplyr::group_by(patient) %>% 
+  dplyr::slice_max(avg_patient_celltype, n = 12) %>% 
+  dplyr::pull(Cell_subtype) %>% unique()
+  
+kruskal_results_top_cells <- 
+  df_all_kruskal_results %>% dplyr::slice_max(statistic, n=20) %>% 
+  dplyr::pull(cell_type)
+
+cell_to_visualize <- intersect(df_C2L_proportions_patient_topCells,kruskal_results_top_cells)
+
+df_C2L_PathoAnno_inner_content <- results_C2L_Korean %>%
+  dplyr::inner_join(spots_tumor_annotations, by = c("spot_id" = "spot_id", "sample" = "orig.ident")) %>%
+  dplyr::filter(Cell_subtype != "CMS2") %>% 
+  dplyr::filter(Cell_subtype != "Unkown") %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  dplyr::summarise_all(dplyr::funs(sum)) %>% 
+  dplyr::mutate(patient = str_match(sample , "_\\s*(.*?)\\s*_")[,2]) %>% 
+  dplyr::mutate(replicate = str_remove(sample , "[^A]+")) %>%
+  dplyr::mutate(rep = str_remove(replicate, "[^R]+")) %>% 
+  dplyr::left_join(df_patient_ID_transform) %>% 
+  dplyr::mutate(patient_ID = paste0(patient_ID, "_", rep))   %>%
+  dplyr::filter(Cell_subtype %in% cell_to_visualize)
+
+
+df_C2L_PathoAnno_inner_content$patient_ID  <- 
+  factor(df_C2L_PathoAnno_inner_content$patient_ID , 
+         levels = sort(unique(df_C2L_PathoAnno_inner_content$patient_ID), decreasing = TRUE))
+
+plot_inner_frequency <- 
+  ggplot(df_C2L_PathoAnno_inner_content,aes(x = patient_ID  , y= cell_density_q05, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+  theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="Other Cell Types \n\ Proportions in Tumors", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.5,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 2))
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=300, fig.height=6, fig.width=6, eval=TRUE}
+plot_inner_frequency 
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=300, fig.height=6, fig.width=8, eval=TRUE}
+plot_inner_frequency_CMS2_Others + plot_inner_frequency + 
+  theme(axis.text.y = element_blank())
+```
+
+
+## Neighborhood proportions
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE}
+# cells_to_consider <- cells_to_visualize
+df_C2L_PathoAnno_neigh_content_proportions <- results_C2L_Korean %>%
+  dplyr::inner_join(neigh_spots_df, by = c("spot_id" = "spot_id", "sample" = "sample")) %>%
+  dplyr::filter(Cell_subtype != "CMS2") %>% 
+  dplyr::filter(Cell_subtype != "Unknown") %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype, spot_id) %>% 
+  dplyr::mutate(spot_sample_id = paste0(sample, "_", spot_id)) %>% 
+  dplyr::group_by(spot_sample_id) %>% 
+  dplyr::mutate(Proportions_perSpot = cell_density_q05/sum(cell_density_q05)) %>%
+  dplyr::ungroup() %>% 
+  dplyr::mutate(patient = str_match(sample , "_\\s*(.*?)\\s*_")[,2]) %>%
+  dplyr::inner_join(df_patient_ID_transform, by ="patient")
+  
+
+df_all_kruskal_results <- data.frame()
+
+for (current_celltype in unique(df_C2L_proportions$Cell_subtype)){
+  current_df <- 
+    df_C2L_PathoAnno_neigh_content_proportions %>% 
+    dplyr::filter(Cell_subtype == current_celltype)
+  current_kruskal_results <- 
+    kruskal.test(Proportions_perSpot ~ patient_ID, data = current_df)
+  # boxplot(Proportions_perSpot ~ patient, data = current_df)
+  current_kruskal_df <- 
+    data.frame( cell_type = current_celltype,
+      statistic = current_kruskal_results$statistic, 
+      p.value = current_kruskal_results$p.value)   
+  
+  
+    current_plot <- 
+      ggplot(current_df, aes(x=patient_ID, y=Proportions_perSpot, fill=patient_ID)) + 
+      geom_boxplot()+
+      theme_bw() + 
+      scale_fill_brewer(palette = "Set1") + 
+      theme(panel.grid.major = element_blank(), 
+        axis.title = element_blank(), 
+        axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+        axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+        plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+        labs(title=current_celltype,x="", y = "Proportions per Spot") +
+        theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank())
+    
+    print(current_plot)
+  
+  
+  if (current_celltype  == "Myofibroblasts"){
+    kruskal_myofibroblasts <- 
+      ggplot(current_df, aes(x=patient_ID, y=Proportions_perSpot, fill=patient_ID)) + 
+      geom_boxplot()+
+      theme_bw() + 
+      scale_fill_brewer(palette = "Set1") + 
+      theme(panel.grid.major = element_blank(), 
+        axis.title.x = element_blank(), 
+        axis.title.y = element_text(size=14, face = "bold", family="Arial"),
+        axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+        axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+        plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+        labs(title="Myofibroblasts",x="", y = "Proportions per Spot", fill = "Patient") +
+        theme(legend.position ="bottom",  
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_text(size=14, face="bold", family="Arial")) + 
+        geom_text(x=2.5, y=0.65, label= paste0("Pvalue = ", signif(current_kruskal_df$p.value,digits=3)), 
+                  size = 4.5, family = "Arial",  colour = "darkblue") + 
+      guides(fill = guide_legend(nrow = 2))
+    
+  }
+  
+    
+  if (current_celltype  == "Mature Enterocytes type 2"){
+    kruskal_enterocytes2 <- 
+      ggplot(current_df, aes(x=patient_ID, y=Proportions_perSpot, fill=patient_ID)) + 
+      geom_boxplot()+
+      theme_bw() + 
+      scale_fill_brewer(palette = "Set1") + 
+      theme(panel.grid.major = element_blank(), 
+        axis.title.x = element_blank(), 
+        axis.title.y = element_text(size=14, face = "bold", family="Arial"),
+        axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+        axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+        plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+        labs(title="Mature Enterocytes type 2",x="", y = "Proportions per Spot", fill = "Patient") +
+        theme(legend.position ="bottom",  
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_text(size=14, face="bold", family="Arial")) + 
+        geom_text(x=2.5, y=0.65, label= paste0("Pvalue = ", signif(current_kruskal_df$p.value,digits=3)), 
+                  size = 4.5, family = "Arial",  colour = "darkblue")
+    
+  }  
+
+  if (current_celltype  == "SPP1+"){
+    kruskal_SPP1 <- 
+      ggplot(current_df, aes(x=patient_ID, y=Proportions_perSpot, fill=patient_ID)) + 
+      geom_boxplot()+
+      theme_bw() + 
+      scale_fill_brewer(palette = "Set1") + 
+      theme(panel.grid.major = element_blank(), 
+        axis.title.x = element_blank(), 
+        axis.title.y = element_text(size=14, face = "bold", family="Arial"),
+        axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+        axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+        plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+        labs(title="SPP1+",x="", y = "Proportions per Spot", fill = "Patient") +
+        theme(legend.position ="bottom",  
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_text(size=14, face="bold", family="Arial")) + 
+        scale_y_continuous(limits = c(0, 0.25)) + 
+        geom_text(x=2.5, y=0.25, label= paste0("Pvalue = ", signif(current_kruskal_df$p.value,digits=3)), 
+                  size = 4.5, family = "Arial",  colour = "darkblue")
+    
+  }
+  
+
+  df_all_kruskal_results <- rbind(df_all_kruskal_results, current_kruskal_df)
+}
+
+df_C2L_proportions_patient_neigh_topCells <- 
+  df_C2L_PathoAnno_neigh_content_proportions %>% 
+  dplyr::group_by(patient, Cell_subtype) %>% 
+  dplyr::mutate(avg_patient_celltype = mean(cell_density_q05)) %>% 
+  dplyr::select(patient, Cell_subtype, avg_patient_celltype) %>% 
+  dplyr::distinct() %>% dplyr::group_by(patient) %>% 
+  dplyr::slice_max(avg_patient_celltype, n = 12) %>% 
+  dplyr::pull(Cell_subtype) %>% unique()
+  
+kruskal_results_top_cells <- 
+  df_all_kruskal_results %>% dplyr::slice_max(statistic, n=20) %>% 
+  dplyr::pull(cell_type)
+
+# cell_to_visualize <- 
+#  intersect(df_C2L_proportions_patient_neigh_topCells,kruskal_results_top_cells)
+
+
+df_C2L_PathoAnno_neigh_content <- results_C2L_Korean %>%
+  dplyr::inner_join(neigh_spots_df, by = c("spot_id" = "spot_id", "sample" = "sample")) %>%
+  dplyr::filter(Cell_subtype != "CMS2") %>% 
+  dplyr::select(sample, cell_density_q05, Cell_subtype) %>%
+  dplyr::group_by(sample, Cell_subtype) %>%
+  dplyr::summarise_all(dplyr::funs(sum)) %>% 
+  dplyr::mutate(patient = str_match(sample , "_\\s*(.*?)\\s*_")[,2]) %>% 
+  dplyr::mutate(replicate = str_remove(sample , "[^A]+")) %>%
+  dplyr::mutate(rep = str_remove(replicate, "[^R]+")) %>% 
+  dplyr::left_join(df_patient_ID_transform) %>% 
+  dplyr::mutate(patient_ID = paste0(patient_ID, "_", rep))   %>%
+  dplyr::filter(Cell_subtype %in% cell_to_visualize)
+
+
+
+df_C2L_PathoAnno_neigh_content$patient_ID  <- 
+  factor(df_C2L_PathoAnno_neigh_content$patient_ID , 
+         levels = sort(unique(df_C2L_PathoAnno_neigh_content$patient_ID), decreasing = TRUE))
+
+plot_neigh_frequency <- 
+  ggplot(df_C2L_PathoAnno_neigh_content,aes(x = patient_ID  , y= cell_density_q05, fill = Cell_subtype)) + 
+  geom_bar(stat="identity", position = "fill", width = 0.75, col ="Black") + 
+  coord_flip() + 
+  theme_minimal() + 
+  scale_fill_brewer(palette = "Set1") + 
+  theme( # remove the vertical grid lines
+    panel.grid.major = element_blank(), 
+    axis.title = element_blank(), 
+    axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, vjust = -0.1),
+    axis.text.y = element_text(size=12, face = "bold", family="Arial"),
+    plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+  labs(title ="Cell Type Proportions \n\ in the tumor Neighboorhod", x ="Sample") + 
+  theme(legend.position ="bottom",  
+        axis.title = element_blank(), 
+        legend.text = element_text(size=12, face="bold", family="Arial"), 
+        legend.title = element_blank()) + 
+  scale_y_continuous(position = "left", breaks = c(0,0.5,1)) + 
+  guides(fill=guide_legend(label.position ="left", ncol = 2))
+
+
+df_plot_Anno_totals_neigh <- results_C2L_Korean %>%
+  dplyr::inner_join(neigh_spots_df, by = c("spot_id" = "spot_id", "sample" = "sample")) %>% 
+  dplyr::mutate(patient = str_match(sample , "_\\s*(.*?)\\s*_")[,2]) %>% 
+  dplyr::mutate(replicate = str_remove(sample , "[^A]+")) %>%
+  dplyr::mutate(rep = str_remove(replicate, "[^R]+")) %>% 
+  dplyr::left_join(df_patient_ID_transform) %>% 
+  dplyr::mutate(patient_ID = paste0(patient_ID, "_", rep)) %>% 
+  dplyr::count(patient_ID,Cell_subtype) %>% 
+  dplyr::ungroup() %>% dplyr::distinct(patient_ID   , n)
+
+
+df_plot_Anno_totals_neigh$patient_ID  <- 
+  factor(df_plot_Anno_totals_neigh$patient_ID , 
+         levels = sort(unique(df_plot_Anno_totals_neigh$patient_ID), decreasing = TRUE))
+
+plot_totals_CMS2 <- df_plot_Anno_totals_neigh %>% 
+  ggplot(aes(x=n, y=patient_ID      )) + geom_point(size=3, col="black") +
+  scale_x_continuous(trans = "log2", position = "bottom", breaks = c(128,256,512)) + 
+  theme(axis.title= element_blank(), axis.text.y = element_blank(), 
+        axis.ticks = element_blank(), panel.border = element_blank(),
+        panel.grid.minor = element_blank(), panel.grid.major.y =  element_blank(),
+        panel.grid.major.x = element_line(size=1, linetype=2, colour="Darkred"), 
+        plot.title = element_text(size=14, face = "bold", family="Arial", hjust = 0.5), 
+        axis.text.x = element_text(size=12, face = "bold", family="Arial", angle = 90, hjust = 1, vjust = 1)) + 
+  labs(title="# Spots in the \n\ Tumor Neighboorhod") 
+```
+
+
+```{r, warning=FALSE, message=FALSE, dpi=300, fig.height=6, fig.width=6, eval=TRUE}
+frequency_legend <- get_legend(plot_neigh_frequency)
+plot_neigh_frequency_nolegend <- plot_neigh_frequency + theme(legend.position = "none") 
+
+plot_neigh_frequency_nolegend + plot_spacer() + plot_totals_CMS2 +
+  ggpubr::as_ggplot(frequency_legend) + plot_layout(widths = c(5, -0.75, 2), heights = c(4.5,1))
+```
+
+```{r, warning=FALSE, message=FALSE, dpi=300, fig.height=6, fig.width=8}
+patient_legend <- get_legend(kruskal_myofibroblasts)
+
+kruskal_myofibroblasts_nolegend <- kruskal_myofibroblasts + theme(legend.position = "none") + 
+  labs(tag = "a")
+kruskal_enterocytes2_nolegend <- kruskal_enterocytes2 + theme(legend.position = "none") +
+  theme(axis.title.y = element_blank()) +  
+  labs(tag = "b")
+kruskal_SPP1_nolegend <- kruskal_SPP1 + theme(legend.position = "none") + 
+  theme(axis.title.y = element_blank()) +  
+  labs(tag = "c")
+
+kruskal_myofibroblasts_nolegend + plot_spacer() + kruskal_enterocytes2_nolegend + 
+  plot_spacer() + kruskal_SPP1_nolegend + 
+  plot_spacer() + plot_spacer() +  ggpubr::as_ggplot(patient_legend) + 
+  plot_spacer() + plot_spacer() + 
+  plot_layout(widths = c(3, 0.15, 3,0.15,3), heights = c(6,1))
+```
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

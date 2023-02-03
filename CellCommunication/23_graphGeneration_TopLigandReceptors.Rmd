@@ -1,0 +1,215 @@
+---
+title: "Ligand-Receptor interaction Analysis on CRC samples analysed with 10X VISIUM"
+author: 'Alberto Valdeolivas Urbelz (BEDA, PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, warning=FALSE, message=FALSE}
+library(dplyr)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(Rcpp)
+library(mistyR)
+library(purrr)
+library(tibble)
+library(readr)
+library(stringr)
+library(ggplot2)
+library(cowplot)
+library(RColorBrewer)
+library(liana)
+library(kableExtra)
+library(igraph)
+library(OmnipathR)
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+```
+
+# Results
+
+## Reading Misty results
+
+```{r, warning=FALSE, message=FALSE}
+results_misty_folders <- paste0(data_directory, analysis_name,
+  "IntermediaryFiles/Misty_Results/results_TF_Ligands_DorotheaClusters/")
+
+misty_results <- 
+  collect_results(as.list(list.dirs(results_misty_folders, recursive = FALSE)))
+```
+
+These are the ligand-TF regulations that we consider: 
+
+```{r, warning=FALSE, message=FALSE}
+misty_results_toconsider <-
+  misty_results$importances.aggregated %>% 
+  dplyr::filter(view == "juxta.ligands_2") %>% 
+  dplyr::select(Predictor, Target, Importance) %>% 
+  dplyr::filter(Importance > 1) 
+
+
+misty_results_toconsider %>% 
+  dplyr::arrange(desc(Importance)) %>% 
+  kbl() %>% kable_styling()
+
+ligands_toconsider <- misty_results_toconsider %>% 
+  dplyr::pull(Predictor) %>% unique()
+```
+
+
+## Reading LIANA results 
+
+```{r, message=FALSE, warning=FALSE, eval=TRUE, results='asis'}
+file_name_toread <- paste0(data_directory, 
+  analysis_name, "IntermediaryFiles/MergeClustering/lianaResults.rds")
+liana_results <- readRDS(file_name_toread)
+```
+
+Ligand receptor interactions to consider
+
+```{r, warning=FALSE, message=FALSE, fig.width=12, fig.height=12}
+liana_significant_myligands <- liana_results %>% 
+  dplyr::filter(ligand %in% ligands_toconsider) %>%
+  dplyr::filter(source %in% c("1", "0"), target %in% c("1")) %>% 
+  dplyr::filter(aggregate_rank < 0.01) 
+
+liana_significant_myligands %>%
+  # top_n(25, desc(aggregate_rank)) %>%
+  liana_dotplot(source_groups = c("0", "1"),
+                target_groups = c("1"), 
+                show_complex = FALSE) # + coord_flip()
+  
+
+```
+
+## Building a network using OmniPath
+
+```{r, warning=FALSE, message=FALSE}
+SigNet <- import_omnipath_interactions() %>% 
+  dplyr::mutate(Effect = ifelse(consensus_inhibition == "1", "inhibition", "stimulation")) %>% 
+  dplyr::select(source_genesymbol, target_genesymbol, Effect)
+
+igraph_SigNet <- graph_from_data_frame(SigNet)
+
+omni_resources <- readRDS(system.file(package = "liana", 
+  "omni_resources.rds"))
+
+Ligrec_Net <- omni_resources$OmniPath %>% 
+  dplyr::mutate(Effect = ifelse(consensus_inhibition == "1", "inhibition", "stimulation")) %>% 
+  dplyr::select(source_genesymbol, target_genesymbol, Effect)
+
+all_edges <- c()
+
+for (current_ligand in ligands_toconsider){
+  receptors_currentLigand <-  
+    dplyr::filter(liana_significant_myligands, ligand == current_ligand) %>%
+    dplyr::pull(receptor) %>% unique()
+  TFs_currentLigand <-  
+    dplyr::filter(misty_results_toconsider, Predictor == current_ligand) %>% 
+    dplyr::pull(Target ) %>% unique()
+    
+  for (current_receptor in receptors_currentLigand){
+    vpath_currentRec <- shortest_paths(
+      igraph_SigNet,
+      from = current_receptor,
+      to = TFs_currentLigand,
+      output = c("epath"))  %>% unlist() %>% unique()
+      all_edges <- c(all_edges, vpath_currentRec)
+  }
+}
+
+## Signaling graph
+Signaling_df <- subgraph.edges(igraph_SigNet, eids= unique(all_edges), 
+          delete.vertices = TRUE) %>% 
+  igraph::as_data_frame()
+
+
+## Ligand receptor graph based on LIANA resutls 
+ligrec_df <- liana_significant_myligands %>% 
+  dplyr::select(ligand, receptor) %>%
+  dplyr::inner_join(Ligrec_Net, by = c("ligand"="source_genesymbol", "receptor"="target_genesymbol")) %>%
+  dplyr::rename(from = "ligand", to = "receptor")
+```
+
+```{r, warning=FALSE, message=FALSE}
+LigRec_Sign_df <- rbind.data.frame(ligrec_df, Signaling_df) 
+```
+
+## Average expression of network nodes
+
+We compute the average expression of the receptors, signaling intermediates and
+TFs in the cluster 1 (tumor neighborhood). We therefore need to read Seurat objects
+
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE}
+file_seuratobject <- 
+  paste0(data_directory,analysis_name, "IntermediaryFiles/MergeClustering/SeuratObject_dorothea_res05.rds")
+
+seurat_merge_obj <- readRDS(file_seuratobject)[[2]]
+
+avg_expression_values <- 
+  AverageExpression(seurat_merge_obj,
+                  features= unique(c(LigRec_Sign_df$from,LigRec_Sign_df$to)),
+                  assays = "SCT") %>%
+  as.data.frame() %>% dplyr::select(SCT.1) 
+
+## We add the type of nodes to the avg_expression values. 
+avg_expression_values <- avg_expression_values %>% 
+  tibble::rownames_to_column(var = "gene") %>% 
+  dplyr::mutate(
+    NodeType = ifelse(gene %in% ligands_toconsider, "Ligand", 
+      ifelse(gene %in% unique(liana_significant_myligands$receptor), "Receptor", 
+      ifelse(gene %in% unique(misty_results_toconsider$TFs), "TF", "Signaling Intermediary")))) %>% tibble::column_to_rownames(var = "gene")
+
+## We additionally remove the LR interaction affected by this node removal
+
+
+LigRec_Sign_df <- 
+  dplyr::filter(LigRec_Sign_df, from %in% rownames(avg_expression_values) & 
+                  to %in% rownames(avg_expression_values)) %>%
+  dplyr::filter(to != "IGF2R")
+
+network_towrite <- paste0(data_directory, 
+  analysis_name, "IntermediaryFiles/MergeClustering/NetworkResults/", 
+  "network_all.csv")
+
+attributes_towrite <-  paste0(data_directory, 
+  analysis_name, "IntermediaryFiles/MergeClustering/NetworkResults/", 
+  "attributes_all.csv")
+
+
+## We remove from the network the gene which is not expressed
+write.table(LigRec_Sign_df,file = network_towrite,
+  quote = FALSE, row.names = FALSE, col.names = FALSE, sep= ";")
+
+write.table(avg_expression_values, file = attributes_towrite,
+    quote = FALSE, row.names = TRUE, col.names = FALSE, sep= ";")
+```
+
+## Import network from Cytoscape
+
+<br><br>
+![](IntermediaryFiles/MergeClustering/NetworkResults/network_all.csv.png)
+<br><br>

@@ -1,0 +1,215 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Normalization and Clustering"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/pstore/data/biomics/_pre_portfolio/_platform_evaluation/SpatialTranscriptomics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes the the Spatial Omics data generated with 10X 
+technology on a set of CRC samples and their associated liver sections with 
+metastases and performs clustering and normalization. The datasets are extracted
+from the publication: **Spatiotemporal Immune Landscape of Colorectal Cancer Liver Metastasis at Single-Cell Level** [DOI: 10.1158/2159-8290.CD-21-0316](https://cancerdiscovery.aacrjournals.org/content/12/1/134.long)
+
+```{r, warning=FALSE,message=FALSE}
+library(dplyr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(patchwork, lib.loc = "/pstore/home/valdeola/R/x86_64-pc-linux-gnu-library/4.0.1-foss")
+## We need to load a previous version of spatstat to make Seurat run. Related
+## to the following issue https://github.com/satijalab/seurat/issues/4226
+library(Seurat, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(stringr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(purrr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(readr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(tidyr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(ggplot2, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+#library(tidyverse)
+library(kableExtra, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(gridExtra, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(cowplot, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(msigdbr, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+library(clusterProfiler, lib.loc = "/pstore/apps/bioinfo/R/4.0.1-foss")
+# library(EnhancedVolcano)
+source(file = "../WrapperFunction/SeuratWrappers.R")
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "ST_LiverMetastases_pub/IntermediaryFiles/"
+output_names <- "SeuratList_Clusters_Res05.rds"
+
+
+data_directory_counts <- paste0(data_directory, "ST_data_CRC_LiverMetastasis")
+results_directory <- paste0(data_directory, analysis_name, input_files)
+```
+
+```{r, message=FALSE, warning=FALSE}
+datasets <- 
+  list.dirs(path = data_directory_counts, recursive = FALSE, full.names = TRUE) 
+
+sample_names <- 
+  list.dirs(path = data_directory_counts, recursive = FALSE, full.names = FALSE) 
+```
+
+```{r, message=FALSE, warning=FALSE}
+## Generating Seurat Objects 
+seurat_objects <- 
+  get.seurat.objects(datasets,sample_names)
+
+seurat_objects <- 
+  get.qc.mt.percentage(seurat_objects, mypattern = "^MT-")
+
+## We are not going to filter our samples since the QC results are very different
+
+seurat_objects_filter <-seurat_objects # %>% 
+  # map(function(x) {
+  #  x %>%
+  #  subset(subset  = percent.mt < 50  & nCount_Spatial > 500 & nCount_Spatial < 45000)  
+  #})
+```
+
+
+```{r, message=FALSE, warning=FALSE, eval=TRUE}
+seurat_objects <- normalize.cluster(seurat_objects_filter, min.dist = 0.1, 
+  spread = 0.5, resolution = 0.5)
+
+umap_spatial_plots <- get.umap.spatialClusters(seurat_objects, 
+   label.size = 3,  pt.size.factor = 1.75)
+
+spatial_dim_plot_ident <- lapply(seurat_objects, function(x){
+  SpatialDimPlot(x, cells.highlight = CellsByIdentities(object = x), 
+  facet.highlight = TRUE, ncol = 2, pt.size.factor = 2.5,
+  cols.highlight = c("#8b0023", "#ffffff00"), stroke = 0)
+})
+
+all_markers <- 
+  get.all.markers(seurat_objects, logfc.threshold = 0.5, return.thresh = 0.01, 
+  only.pos = TRUE) 
+all_markers_table <- get.markers.table(all_markers, nr_markers = 2)
+
+write.all.markers(all_markers, 
+  path = "IntermediaryFiles/ClusteringResults/Resolution05/")
+write.loupe.file(seurat_objects, 
+  path = "IntermediaryFiles/ClusteringResults/Resolution05/") 
+
+background_genes <- lapply(seurat_objects, function(x) VariableFeatures(x))
+
+my_categories <- c("C7", "C8")
+my_sub_categories <- 
+   c("CP:KEGG", "CP:REACTOME", "CP:BIOCARTA")
+all_gene_sets <- msigdbr(species = "Homo sapiens")
+
+gene_sets_selected <- 
+  dplyr::filter(all_gene_sets, 
+    (gs_subcat %in% my_sub_categories)) #  |  (gs_cat %in% my_categories))
+
+msigdbr_t2g <- gene_sets_selected %>% 
+   dplyr::select(gs_name, gene_symbol) %>% 
+  as.data.frame()
+
+enrichment_results <- get.enrichment.results.cp(all_markers, background_genes, 
+   pvalueCutoff = 0.01,  pAdjustMethod = "fdr", TERM2GENE = msigdbr_t2g)
+```
+
+# Results for the different Samples {.tabset}
+
+```{r, results = 'asis', message=FALSE, dpi=80, warning=FALSE, eval=TRUE}
+for ( sample in names(seurat_objects )){
+  
+  cat( "## Sample : ", sample , "\n\n" )
+  
+  cat( "Showing sample : ", sample , "\n\n")
+  
+  cat( "### Clusters and their molecular characterization \n\n")
+  
+  cat( "**Umap and Spatial Plot of clusters** \n\n")
+
+  print( umap_spatial_plots[[sample]])
+  
+  cat( "\n\n")
+  
+  print(spatial_dim_plot_ident[[sample]])
+  
+  cat( "\n\n")
+  
+  cat( "**Table containing some of the top markers of the clusters** \n\n")
+  
+  print( all_markers_table[[sample]] %>% 
+      kbl() %>% kable_styling())
+  
+  cat( "\n\n")
+  
+  top5 <- all_markers[[sample]] %>% 
+    group_by(cluster) %>% 
+    top_n(n = 5, wt = avg_log2FC)
+
+  cat( "**Heatmap showing the markers of the different clusters ** \n\n")
+  
+  print(DoHeatmap(seurat_objects[[sample]], features = top5$gene) + NoLegend())
+  
+  cat( "\n\n")
+  
+  cat( "**Spatial and Violin plots showing the expression of the markers of different clusters ** \n\n")
+  
+  for (cluster_nr in levels(Idents(seurat_objects[[sample]]))){
+    cat( "Cluster : ", cluster_nr , "\n\n")
+    genes_cluster <- all_markers_table[[sample]] %>%
+      dplyr::filter(cluster == as.numeric(cluster_nr)) %>%
+      dplyr::pull(gene)
+    print(SpatialFeaturePlot(seurat_objects[[sample]], 
+      features = genes_cluster, 
+      pt.size.factor = 2.25, alpha = c(0.1,1),ncol=2))
+    cat( "\n\n")
+    print(VlnPlot(seurat_objects[[sample]], 
+                  features = genes_cluster, ncol=2))
+    cat( "\n\n")
+    
+  }
+
+  cat( "\n\n")
+  
+  cat( "**Enrichment Results:**  The dashed line is the statistical treshold for a significant enrichment \n\n")
+  
+  print(get.enrichment.barplots.cp(enrichment_results[[sample]]))
+  
+  cat( "\n\n")
+  
+}
+```
+
+# Saving the results
+
+```{r, eval=TRUE}
+saveRDS(seurat_objects, file = paste0(results_directory, output_names))
+```
+
+
+# Conclusion 
+
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

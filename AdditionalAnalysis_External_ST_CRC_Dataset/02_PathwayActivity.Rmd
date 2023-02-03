@@ -1,0 +1,274 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Pathway Activity using Progeny"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes the the Spatial Omics data generated with 10X 
+technology on a set of CRC samples and their associated liver sections with 
+metastases and computes pathway activity using Progeny. The datasets are extracted
+from the publication: **Spatiotemporal Immune Landscape of Colorectal Cancer Liver Metastasis at Single-Cell Level** [DOI: 10.1158/2159-8290.CD-21-0316](https://cancerdiscovery.aacrjournals.org/content/12/1/134.long)
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(dplyr)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+# library(tidyverse)
+library(tidyr)
+library(stringr)
+library(readr)
+library(purrr)
+library(progeny)
+source(file = "../WrapperFunction/SeuratWrappers.R")
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_files <- "ST_LiverMetastases_pub/IntermediaryFiles/"
+input_names <- "SeuratList_Clusters_Res05.rds"
+output_names <- "SeuratList_Clusters_Res05_Progeny.rds"
+
+files_to_read <- paste0(data_directory, analysis_name,input_files,input_names)
+results_directory <- paste0(data_directory, analysis_name, input_files)
+# setwd(paste0(data_directory, analysis_name))
+```
+
+We read the Seurat objects files after Quality Control
+
+```{r, warning=FALSE}
+seurat_objects <- readRDS(files_to_read)
+```
+
+# Computing Pathway activity with Progeny
+
+We compute Pathway activity using Progeny
+
+```{r, message=FALSE, warning=FALSE}
+seurat_objects <- get.progeny.scores(seurat_objects)
+# pathway_plots <- get.pathway.plots(seurat_objects, pt.size.factor = 2.25)
+```
+
+# Results {.tabset}
+
+We display the spatial plots showing pathway activity per spot and violing plots
+showing pathway activity per cluster.
+
+```{r, results = 'asis', message=FALSE, dpi=80, warning=FALSE, eval=FALSE}
+for ( sample in names(seurat_objects)){
+  
+  cat( "## Sample : ", sample , "\n\n" )
+  
+  cat( "Showing sample : ", sample , "\n\n")
+  
+  pathways <- 
+    unique(rownames(GetAssayData(seurat_objects[[sample]], assay = "progeny")))
+  DefaultAssay(seurat_objects[[sample]]) <- "progeny"
+  
+  for (j in seq(from = 1,to= length(pathways), by=2)){
+    current_pathways <- pathways[c(j,j+1)]
+    print(SpatialFeaturePlot(seurat_objects[[sample]], 
+      features = current_pathways, ncol = 2, alpha = 1, pt.size.factor = 2))  
+    cat( "\n\n")
+    print(VlnPlot(seurat_objects[[sample]], 
+                  features = current_pathways, ncol=2))
+    cat( "\n\n")
+  }
+}
+```
+
+# Publication plots
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- 'ST-colon1'
+current_obj <- seurat_objects[[current_sample]]
+DefaultAssay(current_obj) <- "progeny"
+
+
+
+current_pathway <- c("WNT")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_obj)[current_pathway,]), 
+              max(GetAssayData(current_obj)[current_pathway,]), length.out= 4),1)
+
+
+ST_colon1_WNT <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_obj,
+      features = c(current_pathway), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("WNT Pathway activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon1_WNT
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_pathway <- c("MAPK")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_obj)[current_pathway,]), 
+              max(GetAssayData(current_obj)[current_pathway,]), length.out= 4),1)
+
+
+ST_colon1_MAPK <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_obj,
+      features = c(current_pathway), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("MAPK Pathway activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_colon1_MAPK
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- 'ST-liver1'
+current_obj <- seurat_objects[[current_sample]]
+DefaultAssay(current_obj) <- "progeny"
+
+
+current_pathway <- c("WNT")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_obj)[current_pathway,]), 
+              max(GetAssayData(current_obj)[current_pathway,]), length.out= 4),1)
+
+
+ST_liver1_WNT <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_obj,
+      features = c(current_pathway), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("WNT Pathway activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+ST_liver1_WNT
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_pathway <- c("MAPK")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_obj)[current_pathway,]), 
+              max(GetAssayData(current_obj)[current_pathway,]), length.out= 4),1)
+
+
+ST_liver1_MAPK <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_obj,
+      features = c(current_pathway), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("MAPK Pathway activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+ST_liver1_MAPK
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_sample <- 'ST-liver2'
+current_obj <- seurat_objects[[current_sample]]
+DefaultAssay(current_obj) <- "progeny"
+
+
+current_pathway <- c("VEGF")
+breaks_vec <- 
+    round(seq(min(GetAssayData(current_obj)[current_pathway,]), 
+              max(GetAssayData(current_obj)[current_pathway,]), length.out= 4),1)
+
+
+ST_liver2_VEGF <- 
+    Seurat::SpatialFeaturePlot(
+      object = current_obj,
+      features = c(current_pathway), alpha = c(0,1), 
+      image.alpha = 0.6, pt.size.factor = 1.75, stroke = 1) + 
+      ggtitle("VEGF Pathway activity") + 
+      scale_fill_gradient(high = "#67000D", low = "white", 
+                      breaks=breaks_vec,name=NULL) + 
+      theme(legend.position="right", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(angle = 90, face="bold", size=10),
+        title = element_text(face = "bold", size= 10), 
+        plot.title = element_text(hjust = 0.5)) 
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+ST_liver2_VEGF
+```
+
+
+
+
+# Conclusions
+
+# Saving the results
+
+```{r, eval=FALSE}
+saveRDS(seurat_objects, file = paste0(results_directory, output_names))
+```
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

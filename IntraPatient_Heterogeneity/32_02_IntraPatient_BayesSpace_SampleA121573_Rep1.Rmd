@@ -1,0 +1,345 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Clustering of the sample SN123_A595688_Rep1  with BayesSpace"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/pstore/data/biomics/_pre_portfolio/_platform_evaluation/SpatialTranscriptomics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes the sample SN123_A595688_Rep1 which belongs to a set of 
+CRC samples processed by the Spatial transcriptomics technology of 10X VISIUM. 
+It performs clustering on the aforementioned sample using the BayesSpace 
+package.
+
+```{r, warning=FALSE, message=FALSE}
+library(BayesSpace)
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(SingleCellExperiment)
+library(ggplot2)
+library(readr)
+library(stringr)
+library(purrr)
+library(msigdbr)
+library(clusterProfiler)
+library(sctransform)
+library(kableExtra)
+source(file = "WrapperFunction/SeuratWrappers.R")
+
+
+data_directory <- 
+ params$data_directory
+analysis_name <- 
+  params$analysis_name
+counts_directory <- "/outs"
+
+# setwd(paste0(data_directory, analysis_name))
+input_folder <- "IntermediaryFiles/"
+input_names_2 <- "Patho_Annotations/"
+
+input_names <- "SeuratList_Clusters_Res05.rds"
+data_directory_counts <- paste0(data_directory, "Fastq_Merged")
+dirname <- paste0(data_directory_counts, "/Count_SN048_A121573_Rep1/outs/")
+sample <- "SN048_A121573_Rep1"
+
+files_to_read_2 <- paste0(data_directory, analysis_name,input_folder,input_names_2)
+```
+
+## Reading pathologist annotations
+
+We read the pathologist annotations to keep the spots containing tumor. 
+
+```{r, warning=FALSE, message=FALSE}
+tumor_annotations <- c("tumor")
+tumor_annotations_all <- 
+  c("tumor", "tumor&stroma_IC med to high", "tumor&stroma_IC low", 
+    "tumor&stroma IC med to high")
+
+patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        sample, ".csv"))
+
+colnames(patho_anno_current_sample) <- c("Barcode", "Pathologist_Annotations")
+
+tumor_spots <- dplyr::filter(patho_anno_current_sample, 
+  Pathologist_Annotations %in% tumor_annotations) %>% 
+  dplyr::pull(Barcode)
+```
+
+
+
+## Data processing with SCE and object subsetting
+
+We read the 10x VISIUM data convert to single cell experiment object and apply
+the pre-processing required to apply BayesSpace clustering
+
+```{r, warning=FALSE, message=FALSE, eval=FALSE}
+set.seed(100)
+sce <- readVisium(dirname)
+sce_subset <- sce[,colnames(sce) %in% tumor_spots]
+sce_subset <- scuttle::logNormCounts(sce_subset)
+dec <- scran::modelGeneVar(sce_subset)
+top <- scran::getTopHVGs(dec, n = 2000)
+sce_subset <- scater::runPCA(sce_subset, subset_row=top)
+sce_subset <- spatialPreprocess(sce_subset, platform="Visium", skip.PCA=TRUE)
+```
+
+# Results
+
+## Selecting the optimal number of clusters
+
+We check the optimal number of  clusters
+
+```{r, warning=FALSE, message=FALSE, dpi=300, eval=FALSE}
+set.seed(100)
+sce_subset <- qTune(sce_subset, qs=seq(2, 10), platform="Visium", d=15)
+qPlot(sce_subset)
+```
+
+The optimal cluster of numbers is 4
+
+```{r ,warning=FALSE, message=FALSE}
+q=4
+```
+
+## Clustering Results 
+
+We run the clustering based on that number. 
+
+```{r, warning=FALSE, message=FALSE, eval=FALSE}
+set.seed(100)
+sce_subset <- spatialCluster(sce_subset, q=q, platform="Visium", d=15,
+  init.method="mclust", model="t",
+  nrep=50000, burn.in=1000,  
+  save.chain=FALSE)
+```
+
+We also compute the enhanced clustering.
+
+```{r, warning=FALSE, message=FALSE, eval=FALSE}
+set.seed(100)
+sce_subset.enhanced <- spatialEnhance(sce_subset, q=q, platform="Visium", d=15,
+  model="t", jitter_prior=0.3, jitter_scale=3, nrep = 2e+05, burn.in=10000,
+  save.chain=FALSE)
+```
+
+And we enhace the expression of all our features.
+
+```{r, warning=FALSE, message=FALSE, eval=FALSE}
+set.seed(100)
+sce_subset.enhanced <- enhanceFeatures(sce_subset.enhanced, sce_subset, 
+  model="xgboost", feature_names=rownames(sce_subset), nrounds=0)
+```
+
+We save the results so we can continue later on with the analysis.
+
+```{r, warning=FALSE, message=FALSE, eval=FALSE}
+results_enhanced_cluster_expression <- list(sce_subset.enhanced, sce_subset)
+filename_BayesSpaceResults <- 
+  paste0(data_directory, analysis_name, input_folder, 
+      "BayesSpaceResults/Pathology_Tumor_Annotations/", sample , ".rds")
+saveRDS(results_enhanced_cluster_expression, file = filename_BayesSpaceResults)
+```
+
+
+## Displaying the Clustering Results 
+
+We read the results from the previous steps to continue with the analysis. 
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE}
+list_results <- readRDS(paste0(data_directory, analysis_name, input_folder, 
+      "BayesSpaceResults/Pathology_Tumor_Annotations/", sample , ".rds"))
+sce_subset <- list_results[[2]]
+sce_subset.enhanced <-list_results[[1]]
+## There are actually only 3 clusters due to the non matched neighbors.
+sce_subset$spatial.cluster[sce_subset$spatial.cluster == 4] <-1 
+```
+
+We plot the regular clustering 
+
+```{r, dpi=300, warning=FALSE, message=FALSE}
+q <- 3
+palette <- RColorBrewer::brewer.pal(q, "Dark2")
+clusterPlot(sce_subset, palette=palette, size= 0.05)
+```
+
+We plot the enhanced clustering
+
+```{r, dpi=300, warning=FALSE, message=FALSE}
+clusterPlot(sce_subset.enhanced, palette=palette, size= 0.05) + theme(plot.background = element_rect(fill = "transparent",colour = NA))
+```
+
+## Differential expression analysis
+
+We now perform differential expression analysis between the clusters that 
+match with the tumor areas to explore their differences. 
+
+To do so, we first create a Seurat object from the SingleCellExperiment object
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE}
+seurat_obj <- Seurat::CreateSeuratObject(
+  counts=SingleCellExperiment::logcounts(sce_subset),
+  assay='Spatial',meta.data=as.data.frame(colData(sce_subset)))
+seurat_obj <- Seurat::SetIdent(seurat_obj, value = "spatial.cluster")
+
+seurat_obj@assays$Spatial@scale.data <-
+    seurat_obj@assays$Spatial@data %>% as.matrix %>% t %>% scale %>% t
+```
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE}
+image.dir <- paste0(dirname, "spatial")
+
+image <- Seurat::Read10X_Image(image.dir, filter.matrix = TRUE)
+image <- image[Seurat::Cells(x = seurat_obj)]
+Seurat::DefaultAssay(seurat_obj = image) <- "Spatial"
+seurat_obj[["slice1"]] <- image
+
+p <- Seurat::SpatialPlot(seurat_obj, pt.size.factor = 2, #  cols=palette, 
+  image.alpha = 0.5,crop = TRUE) + 
+  guides(fill=guide_legend(title="Clusters ID")) + 
+  theme(legend.title = element_text(size=14), 
+    legend.text = element_text(size=12), 
+    legend.key = element_rect(fill = "transparent", colour = "transparent")) 
+p 
+```
+
+```{r, warning=FALSE, message=FALSE, eval=TRUE}
+seurat_obj.enhanced <- Seurat::CreateSeuratObject(
+  counts=SingleCellExperiment::logcounts(sce_subset.enhanced),
+  assay='Spatial',meta.data=as.data.frame(colData(sce_subset.enhanced)))
+seurat_obj.enhanced <- Seurat::SetIdent(seurat_obj.enhanced, value = "spatial.cluster")
+
+seurat_obj.enhanced@assays$Spatial@scale.data <-
+    seurat_obj.enhanced@assays$Spatial@data %>% as.matrix %>% t %>% scale %>% t
+```
+
+```{r, warning=FALSE, message=FALSE}
+n_markers <- 6
+all_markers <- Seurat::FindAllMarkers(seurat_obj.enhanced, assay='Spatial', 
+  slot='data',group.by='spatial.cluster', logfc.threshold=0.25, only.pos=TRUE) %>%
+  dplyr::filter(p_val_adj < 0.01) %>% 
+  dplyr::filter(str_detect(gene, "^RPL*", negate = TRUE)) %>% 
+  dplyr::filter(str_detect(gene, "^RPS*", negate = TRUE)) %>%
+  dplyr::filter(str_detect(gene, "^MT-*", negate = TRUE)) %>%
+  dplyr::filter(str_detect(gene, "^MTRNR*", negate = TRUE))
+
+
+top_markers <- all_markers %>% 
+    dplyr::group_by(cluster) %>% 
+    dplyr::slice_max(avg_log2FC , n = n_markers) 
+
+## Plot expression of markers
+Seurat::DoHeatmap(seurat_obj.enhanced, features = top_markers$gene, 
+  slot='scale.data',
+  group.by = "spatial.cluster", group.colors=palette, 
+  angle=0, size=4, label = TRUE, raster=FALSE) + 
+  guides(col = FALSE)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+# all_genes <- unique(rownames(seurat_obj.enhanced))
+# background_genes <- all_genes
+# my_sub_categories <- "GO:BP"
+# all_gene_sets <- msigdbr(species = "Homo sapiens")
+
+# gene_sets_selected <- 
+#  dplyr::filter(all_gene_sets, gs_subcat %in% my_sub_categories)
+
+# msigdbr_t2g <- gene_sets_selected %>% 
+#   dplyr::select(gs_name, gene_symbol) %>% 
+#  as.data.frame()
+
+all_gene_sets <- msigdbr(species = "Homo sapiens")
+
+background_genes <-  rownames(seurat_obj.enhanced)
+
+my_categories <- c("H")
+
+gene_sets_selected <- 
+  dplyr::filter(all_gene_sets, 
+    (gs_cat %in% my_categories)) #  |  (gs_cat %in% my_categories))
+
+msigdbr_t2g <- gene_sets_selected %>% 
+   dplyr::select(gs_name , gene_symbol) %>% 
+  as.data.frame()
+```
+
+
+```{r, warning=FALSE, message=FALSE, results='asis'}
+my_groups <- as.character(unique(all_markers$cluster))
+
+for (current_group in my_groups){
+  
+  cat( "### Group : ", current_group , "\n\n" )
+  
+  current_genes <- 
+    dplyr::filter(all_markers, cluster ==current_group) %>% 
+    dplyr::pull(gene)
+  
+  
+  enrichment_results <- 
+    enricher(current_genes, background_genes, 
+    pvalueCutoff = 0.01,  pAdjustMethod = "fdr", TERM2GENE = msigdbr_t2g,
+    minGSSize = 5) 
+  
+  enrichment_results_sig <- 
+    enrichment_results@result %>% dplyr::filter(pvalue <= 0.01) %>% 
+    dplyr::select(Description, GeneRatio, BgRatio, pvalue, p.adjust, qvalue, geneID ) %>% 
+    dplyr::mutate(Description = str_replace(Description, "HALLMARK_", "")) %>%
+    dplyr::mutate(Description = str_replace_all(Description, "_", " "))
+  
+  print(enrichment_results_sig %>%   kbl(row.names = FALSE) %>%
+  kable_styling())
+  
+  cat( "\n\n" )
+
+  print(ggplot(enrichment_results_sig, aes(-log2(pvalue),reorder(Description, -log2(pvalue)))) +
+    geom_col(fill = "#67000D", alpha =0.5 ) + theme_minimal() + 
+    theme(axis.text.x = element_text(angle = 0, hjust = 0, size = 12, face="bold", family = "Arial"), 
+          axis.text.y = element_text(angle = 0, hjust = 1, size = 10, face="bold", family = "Arial"),
+          axis.title.x = element_text(size=14, face = "bold", family="Arial"), 
+          plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+    labs(title=current_group,x=paste0("-Log2 (p-Value)"), y = "") + 
+    scale_x_continuous(position = "bottom") + 
+    geom_vline(xintercept = -log2(0.01), linetype = "dashed", 
+                   colour = "darkblue", size = 1.25))
+    
+
+  cat( "\n\n" )
+  
+}
+```
+
+
+
+
+# Session Info Details    
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```

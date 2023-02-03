@@ -1,0 +1,557 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: gene Expression gradients in the sample SN123_A595688_Rep1"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/projects/site/pred/SpatialOmics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The present script takes the sample SN123_A595688_Rep1 which belongs to a set of 
+CRC samples processed by the Spatial transcriptomics technology of 10X VISIUM. 
+It performs clustering on the aforementioned sample using the BayesSpace 
+package.
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork, lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(readr)
+library(stringr)
+library(purrr)
+library(cowplot)
+library(ggpubr)
+library(msigdbr)
+library(clusterProfiler)
+library(kableExtra)
+source(file = "WrapperFunction/SeuratWrappers.R")
+
+
+data_directory <- 
+ params$data_directory
+analysis_name <- 
+  params$analysis_name
+counts_directory <- "/outs"
+
+data_directory <-  params$data_directory
+analysis_name <- params$analysis_name
+
+input_folder <- "IntermediaryFiles/"
+input_names_1 <- "SeuratList_Clusters_Res05.rds"
+input_names_2 <- "Patho_Annotations/"
+
+files_to_read_1 <- paste0(data_directory, analysis_name,input_folder,input_names_1)
+files_to_read_2 <- paste0(data_directory, analysis_name,input_folder,input_names_2)
+
+current_sample <- "SN123_A595688_Rep1"
+```
+
+## Reading pathologist annotations
+
+We read the pathologist annotations to keep the spots containing tumor. 
+
+I include pathologist annotations to the Seurat objects
+
+```{r, warning=FALSE, message=FALSE}
+seurat_objects <- readRDS(files_to_read_1)
+seurat_object_A595688_Rep1 <- seurat_objects[[current_sample]]
+
+tumor_annotations <- c("tumor")
+
+patho_anno_current_sample <- 
+      read_csv(file = paste0(files_to_read_2, "Pathologist_Annotations_", 
+        current_sample, ".csv"))
+
+colnames(patho_anno_current_sample) <- c("Barcode", "Pathologist_Annotations")
+
+seurat_object_A595688_Rep1@meta.data <- 
+  seurat_object_A595688_Rep1@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(patho_anno_current_sample, by = c("spot_id" = "Barcode")) %>%
+  dplyr::mutate(Pathologist_Annotations = str_replace(Pathologist_Annotations, 
+  "tumor&stroma IC med to high", "tumor&stroma_IC med to high")) %>% 
+  tibble::column_to_rownames("spot_id") 
+
+Idents(seurat_object_A595688_Rep1) <- 'Pathologist_Annotations'
+```
+
+## Calculating distances
+
+```{r, warning=FALSE, message=FALSE, dpi=120, fig.height=8, fig.width=10}
+geometry <- 
+  GetTissueCoordinates(seurat_object_A595688_Rep1, 
+  cols = c("row", "col"), scale = NULL)
+    
+dist_matrix <- dist(geometry, method = "euclidean") %>% as.matrix()
+
+tumor_spots <- seurat_object_A595688_Rep1@meta.data %>% 
+  dplyr::filter(Pathologist_Annotations == tumor_annotations) %>% rownames()
+
+non_tumor_spots <- seurat_object_A595688_Rep1@meta.data %>% 
+  dplyr::filter(Pathologist_Annotations != tumor_annotations) %>% rownames()
+
+sort(apply(dist_matrix[tumor_spots, non_tumor_spots], 1, min))
+```
+
+```{r, warning=FALSE, message=FALSE}
+spots_distances <- apply(dist_matrix[tumor_spots, non_tumor_spots], 1, min)
+
+group1 <- names(spots_distances)[which(spots_distances < 2)]
+group2 <- names(spots_distances)[which(spots_distances >= 2 & spots_distances <2.5)]
+group3 <- names(spots_distances)[which(spots_distances >= 2.5)]
+
+df_distances <- data.frame(spot_id = c(group1, group2, group3), 
+  group = c(rep("Peripheral Tumor", length(group1)),rep("Intermediary Tumor", length(group2)),
+            rep("Central Tumor", length(group3))))
+
+seurat_object_A595688_Rep1_Tumor <- 
+  subset(seurat_object_A595688_Rep1, 
+    idents = intersect(levels(Idents(seurat_object_A595688_Rep1)), 
+    tumor_annotations))
+
+# We renormalize the subset
+seurat_object_A595688_Rep1_Tumor <- 
+  SCTransform(seurat_object_A595688_Rep1_Tumor, assay = "Spatial", verbose = FALSE) 
+
+seurat_object_A595688_Rep1_Tumor@meta.data <-
+  seurat_object_A595688_Rep1_Tumor@meta.data %>%
+  tibble::rownames_to_column("spot_id") %>%
+  dplyr::left_join(df_distances, by = "spot_id") %>%
+  tibble::column_to_rownames("spot_id") 
+
+Idents(seurat_object_A595688_Rep1_Tumor)<- 'group'
+
+Markers_per_group <- 
+  FindAllMarkers(seurat_object_A595688_Rep1_Tumor, 
+               logfc.threshold = 0.25, only.pos = TRUE) %>% 
+  dplyr::arrange(desc(avg_log2FC))
+```
+
+## Enrichment Analysis
+
+```{r, warning=FALSE, message=FALSE}
+all_gene_sets <- msigdbr(species = "Homo sapiens")
+
+background_genes <-  rownames(seurat_object_A595688_Rep1_Tumor)
+
+my_categories <- c("H")
+
+# my_sub_categories <- 
+#    c("GO:BP")
+
+gene_sets_selected <- 
+  dplyr::filter(all_gene_sets, 
+    (gs_cat %in% my_categories)) #  |  (gs_cat %in% my_categories))
+
+msigdbr_t2g <- gene_sets_selected %>% 
+   dplyr::select(gs_name , gene_symbol) %>% 
+  as.data.frame()
+```
+
+
+```{r, warning=FALSE, message=FALSE, results='asis'}
+my_groups <- as.character(unique(Markers_per_group$cluster))
+
+for (current_group in my_groups){
+  
+  cat( "### Group : ", current_group , "\n\n" )
+  
+  current_genes <- 
+    dplyr::filter(Markers_per_group, cluster ==current_group) %>% 
+    dplyr::pull(gene)
+  
+  enrichment_results <- 
+    enricher(current_genes, background_genes, 
+    pvalueCutoff = 0.01,  pAdjustMethod = "fdr", TERM2GENE = msigdbr_t2g,
+    minGSSize = 5) 
+  
+  enrichment_results_sig <- 
+    enrichment_results@result %>% dplyr::filter(pvalue <= 0.01) %>% 
+    dplyr::select(Description, GeneRatio, BgRatio, pvalue, p.adjust, qvalue, geneID ) %>% 
+    dplyr::mutate(Description = str_replace(Description, "HALLMARK_", "")) %>%
+    dplyr::mutate(Description = str_replace_all(Description, "_", " "))
+  
+
+  print(enrichment_results_sig %>%   kbl(row.names = FALSE) %>%
+  kable_styling())
+  
+  cat( "\n\n" )
+  
+  if (current_group == "Central Tumor"){
+    p_central<- 
+    ggplot(enrichment_results_sig, aes(-log2(pvalue),reorder(Description, -log2(pvalue)))) +
+    geom_col(fill = "#67000D", alpha =0.5 ) + theme_minimal() + 
+    theme(axis.text.x = element_text(angle = 0, hjust = 0, size = 12, face="bold", family = "Arial"), 
+          axis.text.y = element_text(angle = 0, hjust = 1, size = 10, face="bold", family = "Arial"),
+          axis.title.x = element_text(size=14, face = "bold", family="Arial"), 
+          plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+    labs(title=current_group,x=paste0("-Log2 (p-Value)"), y = "") + 
+    scale_x_continuous(position = "bottom") + 
+    geom_vline(xintercept = -log2(0.01), linetype = "dashed", 
+                   colour = "darkblue", size = 1.25)
+      
+  }
+  
+  if (current_group == "Peripheral Tumor"){
+    p_peripheral <- 
+        ggplot(enrichment_results_sig, aes(-log2(pvalue),reorder(Description, -log2(pvalue)))) +
+    geom_col(fill = "#67000D", alpha =0.5 ) + theme_minimal() + 
+    theme(axis.text.x = element_text(angle = 0, hjust = 0, size = 12, face="bold", family = "Arial"), 
+          axis.text.y = element_text(angle = 0, hjust = 1, size = 10, face="bold", family = "Arial"),
+          axis.title.x = element_text(size=14, face = "bold", family="Arial"), 
+          plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+    labs(title=current_group,x=paste0("-Log2 (p-Value)"), y = "") + 
+    scale_x_continuous(position = "bottom") + 
+    geom_vline(xintercept = -log2(0.01), linetype = "dashed", 
+                   colour = "darkblue", size = 1.25)
+  }
+  
+  
+  if (current_group == "Intermediary Tumor"){
+    p_intermediary <- 
+            ggplot(enrichment_results_sig, aes(-log2(pvalue),reorder(Description, -log2(pvalue)))) +
+    geom_col(fill = "#67000D", alpha =0.5 ) + theme_minimal() + 
+    theme(axis.text.x = element_text(angle = 0, hjust = 0, size = 12, face="bold", family = "Arial"), 
+          axis.text.y = element_text(angle = 0, hjust = 1, size = 10, face="bold", family = "Arial"),
+          axis.title.x = element_text(size=14, face = "bold", family="Arial"), 
+          plot.title =  element_text(face="bold", size=14, hjust = 0.5)) + 
+    labs(title=current_group,x=paste0("-Log2 (p-Value)"), y = "") + 
+    scale_x_continuous(position = "bottom") + 
+    geom_vline(xintercept = -log2(0.01), linetype = "dashed", 
+                   colour = "darkblue", size = 1.25)
+  
+  }
+    
+
+  cat( "\n\n" )
+  
+}
+```
+
+```{r, warning=FALSE, message=FALSE}
+p_central + labs(tag = "a") + p_peripheral+ labs(tag = "b")
+```
+
+
+## Plotting the most significant genes {.tabset}
+
+```{r, warning=FALSE, message=FALSE, results='asis'}
+genes_to_plot <- Markers_per_group %>% 
+  dplyr::group_by(cluster) %>% 
+  dplyr::slice_max(avg_log2FC, n = 10) %>% dplyr::pull(gene)
+
+palette <- RColorBrewer::brewer.pal(3, "Set1")
+
+for (current_gene in genes_to_plot) {
+  
+  cat( "### Current Gene : ", current_gene , "\n\n" )
+  
+  print(VlnPlot(seurat_object_A595688_Rep1_Tumor, features=current_gene, 
+                cols = palette, adjust=1.25))
+  
+  cat( "\n\n" )
+  
+  print(SpatialFeaturePlot(seurat_object_A595688_Rep1_Tumor, features = current_gene,
+        pt.size.factor = 3, stroke = 1, image.alpha = 0.5))
+  
+  cat( "\n\n" )
+}
+```
+
+
+## Publication plots
+
+```{r, warning=FALSE, message=FALSE}
+current_gene <- "SPARC"
+current_pvalue <- Markers_per_group %>% dplyr::filter(gene == current_gene) %>% 
+  dplyr::pull(p_val_adj) %>% format(scientific=TRUE, digits=3) 
+
+current_vln_plot_SPARC <- VlnPlot(seurat_object_A595688_Rep1_Tumor, features=current_gene, 
+                cols = palette, adjust=1.25, pt.size =1.5) + 
+  theme(axis.title.x = element_blank(), 
+    plot.title = element_text(hjust = 0), axis.text.x = element_blank(), 
+    legend.position = "bottom") + 
+  guides(fill=guide_legend(nrow=1,byrow=TRUE)) + 
+  geom_text(x=2, y=4.35, label= paste0("P-value adj. = ", current_pvalue), 
+    size = 4.5, family = "Arial",  colour = "darkblue")
+
+breaks_vec <-  
+  round(seq(0, max(GetAssayData(seurat_object_A595688_Rep1_Tumor)[current_gene,]), length.out= 5),1)
+
+current_spt_plot_SPARC <- Seurat::SpatialFeaturePlot(
+      object = seurat_object_A595688_Rep1_Tumor,
+      features = current_gene, alpha = c(0.25,1), 
+      image.alpha = 0.6, pt.size.factor = 3.25, stroke = 0) + 
+      ggtitle(current_gene) + 
+      scale_fill_gradient2(high = "#67000D", mid = "white",  
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="left", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_blank()) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_vln_plot_Legend_SPARC <- get_legend(current_vln_plot_SPARC)
+current_vln_plot_Nolegend_SPARC <- current_vln_plot_SPARC + NoLegend()
+current_vln_plot_Nolegend_SPARC + current_spt_plot_SPARC +  ggpubr::as_ggplot(current_vln_plot_Legend_SPARC) + 
+  plot_layout(widths = c(1, 1), heights = c(5,1), ncol = 2, nrow = 2)
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_gene <- "SCD"
+current_pvalue <- Markers_per_group %>% dplyr::filter(gene == current_gene) %>% 
+  dplyr::pull(p_val_adj) %>% format(scientific=TRUE, digits=3) 
+
+current_vln_plot_SCD <- VlnPlot(seurat_object_A595688_Rep1_Tumor, features=current_gene, 
+                cols = palette, adjust=1.25, pt.size =1.5) + 
+  theme(axis.title.x = element_blank(), 
+    plot.title = element_text(hjust = 0), axis.text.x = element_blank(), 
+    legend.position = "bottom") + 
+  guides(fill=guide_legend(nrow=1,byrow=TRUE)) + 
+  geom_text(x=1.25, y=3.85, label= paste0("P-value adj. = ", current_pvalue), 
+    size = 4.5, family = "Arial",  colour = "darkblue")
+
+breaks_vec <-  
+  round(seq(0, max(GetAssayData(seurat_object_A595688_Rep1_Tumor)[current_gene,]), length.out= 5),1)
+
+current_spt_plot_SCD <- Seurat::SpatialFeaturePlot(
+      object = seurat_object_A595688_Rep1_Tumor,
+      features = current_gene, alpha = c(0.25,1), 
+      image.alpha = 0.6, pt.size.factor = 3.10, stroke = 0) + 
+      ggtitle(current_gene) + 
+      scale_fill_gradient2(high = "#67000D", mid = "white",  
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="left", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_blank()) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_vln_plot_Legend_SCD <- get_legend(current_vln_plot_SCD)
+current_vln_plot_Nolegend_SCD <- current_vln_plot_SCD + NoLegend()
+current_vln_plot_Nolegend_SCD + current_spt_plot_SCD +  ggpubr::as_ggplot(current_vln_plot_Legend_SCD) + 
+  plot_layout(widths = c(1, 1), heights = c(5,1), ncol = 2, nrow = 2)
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_vln_plot_Nolegend_SPARC + current_spt_plot_SPARC +  
+current_vln_plot_Nolegend_SCD + current_spt_plot_SCD +  
+  ggpubr::as_ggplot(current_vln_plot_Legend_SCD) + 
+  plot_layout(widths = c(1, 1), heights = c(4,4,1), ncol = 2, nrow = 3)
+```
+
+## Supplementary Plots
+
+### FBLN1 and COL3A1
+
+```{r, warning=FALSE, message=FALSE}
+current_gene <- "FBLN1"
+current_pvalue <- Markers_per_group %>% dplyr::filter(gene == current_gene) %>% 
+  dplyr::pull(p_val_adj) %>% format(scientific=TRUE, digits=3) 
+
+current_vln_plot_FBLN1 <- VlnPlot(seurat_object_A595688_Rep1_Tumor, features=current_gene, 
+                cols = palette, adjust=1.25, pt.size =1.5) + 
+  theme(axis.title.x = element_blank(), 
+    plot.title = element_text(hjust = 0), axis.text.x = element_blank(), 
+    legend.position = "bottom") + 
+  guides(fill=guide_legend(nrow=1,byrow=TRUE)) + 
+  geom_text(x=2.25, y=2.5, label= paste0("P-value adj. = ", current_pvalue), 
+    size = 4.5, family = "Arial",  colour = "darkblue")
+
+breaks_vec <-  
+  round(seq(0, max(GetAssayData(seurat_object_A595688_Rep1_Tumor)[current_gene,]), length.out= 5),1)
+
+current_spt_plot_FBLN1 <- Seurat::SpatialFeaturePlot(
+      object = seurat_object_A595688_Rep1_Tumor,
+      features = current_gene, alpha = c(0.25,1), 
+      image.alpha = 0.6, pt.size.factor = 3.25, stroke = 0) + 
+      ggtitle(current_gene) + 
+      scale_fill_gradient2(high = "#67000D", mid = "white",  
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="left", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_blank()) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_vln_plot_Legend_FBLN1 <- get_legend(current_vln_plot_FBLN1)
+current_vln_plot_Nolegend_FBLN1 <- current_vln_plot_FBLN1 + NoLegend()
+current_vln_plot_Nolegend_FBLN1 + current_spt_plot_FBLN1 +  ggpubr::as_ggplot(current_vln_plot_Legend_FBLN1) + 
+  plot_layout(widths = c(1, 1), heights = c(5,1), ncol = 2, nrow = 2)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_gene <- "COL3A1"
+current_pvalue <- Markers_per_group %>% dplyr::filter(gene == current_gene) %>% 
+  dplyr::pull(p_val_adj) %>% format(scientific=TRUE, digits=3) 
+
+current_vln_plot_COL3A1 <- VlnPlot(seurat_object_A595688_Rep1_Tumor, features=current_gene, 
+                cols = palette, adjust=1.25, pt.size =1.5) + 
+  theme(axis.title.x = element_blank(), 
+    plot.title = element_text(hjust = 0), axis.text.x = element_blank(), 
+    legend.position = "bottom") + 
+  guides(fill=guide_legend(nrow=1,byrow=TRUE)) + 
+  geom_text(x=2.25, y=3.85, label= paste0("P-value adj. = ", current_pvalue), 
+    size = 4.5, family = "Arial",  colour = "darkblue")
+
+breaks_vec <-  
+  round(seq(0, max(GetAssayData(seurat_object_A595688_Rep1_Tumor)[current_gene,]), length.out= 5),1)
+
+current_spt_plot_COL3A1 <- Seurat::SpatialFeaturePlot(
+      object = seurat_object_A595688_Rep1_Tumor,
+      features = current_gene, alpha = c(0.25,1), 
+      image.alpha = 0.6, pt.size.factor = 3.10, stroke = 0) + 
+      ggtitle(current_gene) + 
+      scale_fill_gradient2(high = "#67000D", mid = "white",  
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="left", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_blank()) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_vln_plot_Legend_COL3A1 <- get_legend(current_vln_plot_COL3A1)
+current_vln_plot_Nolegend_COL3A1 <- current_vln_plot_COL3A1 + NoLegend()
+current_vln_plot_Nolegend_COL3A1 + current_spt_plot_COL3A1 +  ggpubr::as_ggplot(current_vln_plot_Legend_COL3A1) + 
+  plot_layout(widths = c(1, 1), heights = c(5,1), ncol = 2, nrow = 2)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_vln_plot_Nolegend_FBLN1 + current_spt_plot_FBLN1 +  
+current_vln_plot_Nolegend_COL3A1 + current_spt_plot_COL3A1 +  
+  ggpubr::as_ggplot(current_vln_plot_Legend_COL3A1) + 
+  plot_layout(widths = c(1, 1), heights = c(4,4,1), ncol = 2, nrow = 3)
+```
+
+
+### INSIG1 and MELTF
+
+```{r, warning=FALSE, message=FALSE}
+current_gene <- "INSIG1"
+current_pvalue <- Markers_per_group %>% dplyr::filter(gene == current_gene) %>% 
+  dplyr::pull(p_val_adj) %>% format(scientific=TRUE, digits=3) 
+
+current_vln_plot_INSIG1 <- VlnPlot(seurat_object_A595688_Rep1_Tumor, features=current_gene, 
+                cols = palette, adjust=1.25, pt.size =1.5) + 
+  theme(axis.title.x = element_blank(), 
+    plot.title = element_text(hjust = 0), axis.text.x = element_blank(), 
+    legend.position = "bottom") + 
+  guides(fill=guide_legend(nrow=1,byrow=TRUE)) + 
+  geom_text(x=1.5, y=3.5, label= paste0("P-value adj. = ", current_pvalue), 
+    size = 4.5, family = "Arial",  colour = "darkblue")
+
+breaks_vec <-  
+  round(seq(0, max(GetAssayData(seurat_object_A595688_Rep1_Tumor)[current_gene,]), length.out= 5),1)
+
+current_spt_plot_INSIG1 <- Seurat::SpatialFeaturePlot(
+      object = seurat_object_A595688_Rep1_Tumor,
+      features = current_gene, alpha = c(0.25,1), 
+      image.alpha = 0.6, pt.size.factor = 3.25, stroke = 0) + 
+      ggtitle(current_gene) + 
+      scale_fill_gradient2(high = "#67000D", mid = "white",  
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="left", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_blank()) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_vln_plot_Legend_INSIG1 <- get_legend(current_vln_plot_INSIG1)
+current_vln_plot_Nolegend_INSIG1 <- current_vln_plot_INSIG1 + NoLegend()
+current_vln_plot_Nolegend_INSIG1 + current_spt_plot_INSIG1 +  ggpubr::as_ggplot(current_vln_plot_Legend_INSIG1) + 
+  plot_layout(widths = c(1, 1), heights = c(5,1), ncol = 2, nrow = 2)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_gene <- "MELTF"
+current_pvalue <- Markers_per_group %>% dplyr::filter(gene == current_gene) %>% 
+  dplyr::pull(p_val_adj) %>% format(scientific=TRUE, digits=3) 
+
+current_vln_plot_MELTF <- VlnPlot(seurat_object_A595688_Rep1_Tumor, features=current_gene, 
+                cols = palette, adjust=1.25, pt.size =1.5) + 
+  theme(axis.title.x = element_blank(), 
+    plot.title = element_text(hjust = 0), axis.text.x = element_blank(), 
+    legend.position = "bottom") + 
+  guides(fill=guide_legend(nrow=1,byrow=TRUE)) + 
+  geom_text(x=3, y=0.5, label= paste0("P-value adj. = \n\ ", current_pvalue), 
+    size = 4.5, family = "Arial",  colour = "darkblue")
+
+breaks_vec <-  
+  round(seq(0, max(GetAssayData(seurat_object_A595688_Rep1_Tumor)[current_gene,]), length.out= 5),1)
+
+current_spt_plot_MELTF <- Seurat::SpatialFeaturePlot(
+      object = seurat_object_A595688_Rep1_Tumor,
+      features = current_gene, alpha = c(0.25,1), 
+      image.alpha = 0.6, pt.size.factor = 3.10, stroke = 0) + 
+      ggtitle(current_gene) + 
+      scale_fill_gradient2(high = "#67000D", mid = "white",  
+                      breaks=breaks_vec,name=NULL ) + 
+      theme(legend.position="left", legend.key.height = unit(0.75, 'cm'),
+        legend.text = element_text(size=10, face="bold"),
+        legend.title = element_text(NULL),
+        title = element_blank()) +
+        theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_vln_plot_Legend_MELTF <- get_legend(current_vln_plot_MELTF)
+current_vln_plot_Nolegend_MELTF <- current_vln_plot_MELTF + NoLegend()
+current_vln_plot_Nolegend_MELTF + current_spt_plot_MELTF +  ggpubr::as_ggplot(current_vln_plot_Legend_MELTF) + 
+  plot_layout(widths = c(1, 1), heights = c(5,1), ncol = 2, nrow = 2)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_vln_plot_Nolegend_INSIG1 + current_spt_plot_INSIG1 +  
+current_vln_plot_Nolegend_MELTF + current_spt_plot_MELTF +  
+  ggpubr::as_ggplot(current_vln_plot_Legend_MELTF) + 
+  plot_layout(widths = c(1, 1), heights = c(4,4,1), ncol = 2, nrow = 3)
+```
+
+# Session Info Details
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```
+
+
+

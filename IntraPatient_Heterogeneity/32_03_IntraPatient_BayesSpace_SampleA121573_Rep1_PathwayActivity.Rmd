@@ -1,0 +1,311 @@
+---
+title: "Analysis of CRC Spatial Transcriptomics data from 10X: Pathway activtiy at the subspot resolution for patient A121573"
+author: 'Alberto Valdeolivas Urbelz (PS-Biomics&Path)'
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    self_contained: true
+    number_sections: yes
+    toc: true
+    toc_depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: spacelab
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+params:
+  data_directory : "/pstore/data/biomics/_pre_portfolio/_platform_evaluation/SpatialTranscriptomics/Experiment_CRC_AllSamples/"
+  analysis_name : "analysis_alberto/"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(vctrs)
+library(patchwork,lib.loc = "/apps/rocs/2020.08/cascadelake/software/R/4.1.2-foss-2020a/lib64/R/library")
+library(Seurat)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(stringr)
+library(progeny)
+library(SingleCellExperiment)
+library(BayesSpace)
+source(file = "WrapperFunction/SeuratWrappers.R")
+
+data_directory <- 
+ params$data_directory
+analysis_name <- 
+  params$analysis_name
+
+# setwd(paste0(data_directory, analysis_name))
+input_folder <- "IntermediaryFiles/"
+
+sample <- "SN048_A121573_Rep1"
+```
+
+```{r, warning=FALSE, message=FALSE}
+list_results <- readRDS(paste0(data_directory, analysis_name, input_folder, 
+      "BayesSpaceResults/Pathology_Tumor_Annotations/", sample , ".rds"))
+sce_subset <- list_results[[2]]
+sce_subset.enhanced <-list_results[[1]]
+## There are actually only 3 clusters due to the non matched neighbors.
+sce_subset$spatial.cluster[sce_subset$spatial.cluster == 4] <-1 
+
+## We convert to a Seurat object 
+seurat_obj.enhanced <- Seurat::CreateSeuratObject(
+  counts=SingleCellExperiment::logcounts(sce_subset.enhanced),
+  assay='Spatial',meta.data=as.data.frame(colData(sce_subset.enhanced)))
+seurat_obj.enhanced <- Seurat::SetIdent(seurat_obj.enhanced, value = "spatial.cluster")
+
+seurat_obj.enhanced@assays$Spatial@scale.data <-
+    seurat_obj.enhanced@assays$Spatial@data %>% as.matrix %>% t %>% scale %>% t
+
+
+seurat_obj.enhanced <- 
+  progeny(seurat_obj.enhanced, assay_name = "Spatial", top = 500, return_assay = TRUE, scale = FALSE)
+DefaultAssay(seurat_obj.enhanced) <- "progeny"
+sce_obj <- as.SingleCellExperiment(seurat_obj.enhanced, assay = "progeny")
+```
+
+# Results: Pathway activity at the subspot resolution {.tabset}
+
+```{r, warning=FALSE, message=FALSE, dpi=300, results = 'asis'}
+all_pathways <- rownames(seurat_obj.enhanced)
+for ( current_pathway in all_pathways){
+  
+  cat( "## Pathway: ", current_pathway , "\n\n")
+  
+  feature_plot <- 
+    featurePlot(sce_obj, feature=current_pathway, diverging = TRUE,  
+             platform = "Visium",is.enhanced = TRUE, color = NA)
+  
+  print(feature_plot)
+  
+  cat( "\n\n")
+
+  violin_plots <- Seurat::VlnPlot(object = seurat_obj.enhanced, 
+    features = current_pathway ,group.by = "spatial.cluster")
+  
+  print(violin_plots)
+  
+  cat( "\n\n")
+}
+```
+
+
+# Plot for publication
+
+
+```{r, warning=FALSE, message=FALSE}
+# We first need to prepare the data to later on perform a Kruskal-Wallis Test to 
+# assess the significance of the results
+q <- 3
+palette <- RColorBrewer::brewer.pal(q, "Dark2")
+
+subspot_cluster_df <- seurat_obj.enhanced@meta.data %>% 
+  tibble::rownames_to_column(var = 'spot_id') %>% 
+  dplyr::select(spot_id, spatial.cluster)
+
+pathway_spot_df <- GetAssayData(seurat_obj.enhanced) %>% 
+  as.data.frame() %>% tibble::rownames_to_column(var = 'Pathway') %>% 
+  pivot_longer(!Pathway, names_to = "spot_id", values_to = "Activity") %>% 
+  dplyr::inner_join(subspot_cluster_df)
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_pathway <- "TGFb"
+
+current_pathway_spot_df <- 
+  dplyr::filter(pathway_spot_df, Pathway  == current_pathway)
+
+results_kruskal <- 
+  kruskal.test(Activity  ~ spatial.cluster, data = current_pathway_spot_df)
+
+# if (results_kruskal$p.value < 2.2e-16){
+#  pvalue_label <- "P-value < 2.2e-16"
+#} else { 
+#  pvalue_label <-paste0("P-value = ", results_kruskal$p.value) 
+#}
+
+pvalue_label <- paste0("P-value = ", signif(results_kruskal$p.value,digits=3)) 
+
+feature_plot_TGFb <- 
+    featurePlot(sce_obj, feature=current_pathway, diverging = TRUE,  
+             platform = "Visium",is.enhanced = TRUE, color = NA) + 
+  theme(legend.position = "left", legend.title = element_blank())
+feature_plot_TGFb
+
+current_vln_plot_TGFb <- VlnPlot(seurat_obj.enhanced, features=current_pathway, 
+                cols = palette, adjust=1.25, pt.size =1) + 
+  theme(axis.title.x = element_blank(), 
+    plot.title = element_text(hjust = 0), axis.text.x = element_blank(), 
+    legend.position = "bottom") + 
+  guides(fill=guide_legend(nrow=1,byrow=TRUE, title="Cluster")) +
+  labs(y = "Activity Level") + 
+  geom_text(x=3, y=500, label= pvalue_label, 
+  size = 4.5, family = "Arial",  colour = "darkblue")
+current_vln_plot_TGFb
+```
+
+
+# Supplementary Plots
+
+
+```{r, warning=FALSE, message=FALSE}
+current_pathway <- "EGFR"
+
+current_pathway_spot_df <- 
+  dplyr::filter(pathway_spot_df, Pathway  == current_pathway)
+
+results_kruskal <- 
+  kruskal.test(Activity  ~ spatial.cluster, data = current_pathway_spot_df)
+
+# if (results_kruskal$p.value < 2.2e-16){
+#  pvalue_label <- "P-value < 2.2e-16"
+#} else { 
+#  pvalue_label <-paste0("P-value = ", results_kruskal$p.value) 
+#}
+pvalue_label <- paste0("P-value = ", signif(results_kruskal$p.value,digits=3)) 
+
+
+feature_plot_EGFR <- 
+    featurePlot(sce_obj, feature=current_pathway, diverging = TRUE,  
+             platform = "Visium",is.enhanced = TRUE, color = NA) + 
+  theme(legend.position = "left", legend.title = element_blank())
+feature_plot_EGFR
+
+current_vln_plot_EGFR <- VlnPlot(seurat_obj.enhanced, features=current_pathway, 
+                cols = palette, adjust=1.25, pt.size =1) + 
+  theme(axis.title.x = element_blank(), 
+    plot.title = element_text(hjust = 0), axis.text.x = element_blank(), 
+    legend.position = "bottom") + 
+  guides(fill=guide_legend(nrow=1,byrow=TRUE, title="Cluster")) +
+  labs(y = "Activity Level") + 
+  geom_text(x=2, y=100, label= pvalue_label, 
+  size = 4.5, family = "Arial",  colour = "darkblue")
+current_vln_plot_EGFR
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_pathway <- "MAPK"
+
+current_pathway_spot_df <- 
+  dplyr::filter(pathway_spot_df, Pathway  == current_pathway)
+
+results_kruskal <- 
+  kruskal.test(Activity  ~ spatial.cluster, data = current_pathway_spot_df)
+
+# if (results_kruskal$p.value < 2.2e-16){
+#  pvalue_label <- "P-value < 2.2e-16"
+#} else { 
+#  pvalue_label <-paste0("P-value = ", results_kruskal$p.value) 
+#}
+pvalue_label <- paste0("P-value = ", signif(results_kruskal$p.value,digits=3)) 
+
+
+feature_plot_MAPK <- 
+    featurePlot(sce_obj, feature=current_pathway, diverging = TRUE,  
+             platform = "Visium",is.enhanced = TRUE, color = NA) + 
+  theme(legend.position = "left", legend.title = element_blank())
+feature_plot_MAPK
+
+current_vln_plot_MAPK <- VlnPlot(seurat_obj.enhanced, features=current_pathway, 
+                cols = palette, adjust=1.25, pt.size =1) + 
+  theme(axis.title.x = element_blank(), 
+    plot.title = element_text(hjust = 0), axis.text.x = element_blank(), 
+    legend.position = "bottom") + 
+  guides(fill=guide_legend(nrow=1,byrow=TRUE, title="Cluster")) +
+  labs(y = "Activity Level") + 
+  geom_text(x=2, y=250, label= pvalue_label, 
+  size = 4.5, family = "Arial",  colour = "darkblue")
+current_vln_plot_MAPK
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+current_pathway <- "WNT"
+
+current_pathway_spot_df <- 
+  dplyr::filter(pathway_spot_df, Pathway  == current_pathway)
+
+results_kruskal <- 
+  kruskal.test(Activity  ~ spatial.cluster, data = current_pathway_spot_df)
+
+# if (results_kruskal$p.value < 2.2e-16){
+#  pvalue_label <- "P-value < 2.2e-16"
+#} else { 
+#  pvalue_label <-paste0("P-value = ", results_kruskal$p.value) 
+#}
+pvalue_label <- paste0("P-value = ", signif(results_kruskal$p.value,digits=3)) 
+
+
+feature_plot_WNT <- 
+    featurePlot(sce_obj, feature=current_pathway, diverging = TRUE,  
+             platform = "Visium",is.enhanced = TRUE, color = NA) + 
+  theme(legend.position = "left", legend.title = element_blank())
+feature_plot_WNT
+
+current_vln_plot_WNT <- VlnPlot(seurat_obj.enhanced, features=current_pathway, 
+                cols = palette, adjust=1.25, pt.size =1) + 
+  theme(axis.title.x = element_blank(), 
+    plot.title = element_text(hjust = 0), axis.text.x = element_blank(), 
+    legend.position = "bottom") + 
+  guides(fill=guide_legend(nrow=1,byrow=TRUE, title="Cluster")) +
+  labs(y = "Activity Level") + 
+  geom_text(x=1, y=30, label= pvalue_label, 
+  size = 4.5, family = "Arial",  colour = "darkblue")
+current_vln_plot_WNT
+```
+
+```{r, warning=FALSE, message=FALSE}
+current_pathway <- "VEGF"
+
+current_pathway_spot_df <- 
+  dplyr::filter(pathway_spot_df, Pathway  == current_pathway)
+
+results_kruskal <- 
+  kruskal.test(Activity  ~ spatial.cluster, data = current_pathway_spot_df)
+
+# if (results_kruskal$p.value < 2.2e-16){
+#  pvalue_label <- "P-value < 2.2e-16"
+#} else { 
+#  pvalue_label <-paste0("P-value = ", results_kruskal$p.value) 
+#}
+pvalue_label <- paste0("P-value = ", signif(results_kruskal$p.value,digits=3)) 
+
+feature_plot_VEGF <- 
+    featurePlot(sce_obj, feature=current_pathway, diverging = TRUE,  
+             platform = "Visium",is.enhanced = TRUE, color = NA) + 
+  theme(legend.position = "left", legend.title = element_blank())
+feature_plot_VEGF
+
+current_vln_plot_VEGF <- VlnPlot(seurat_obj.enhanced, features=current_pathway, 
+                cols = palette, adjust=1.25, pt.size =1) + 
+  theme(axis.title.x = element_blank(), 
+    plot.title = element_text(hjust = 0), axis.text.x = element_blank(), 
+    legend.position = "bottom") + 
+  guides(fill=guide_legend(nrow=1,byrow=TRUE, title="Cluster")) +
+  labs(y = "Activity Level") + 
+  geom_text(x=2, y=60, label= pvalue_label, 
+  size = 4.5, family = "Arial",  colour = "darkblue")
+current_vln_plot_VEGF
+```
+
+
+# Session Info Details    
+
+```{r, echo=FALSE, eval=TRUE}
+sessionInfo()
+```
